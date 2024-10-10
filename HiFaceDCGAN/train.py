@@ -22,71 +22,64 @@ def visual_g_progression(img_list):
 
 
 def train():
-    # Khởi tạo HiFace Generator và Discriminator
-    generator = HiFaceGenerator(ngpu).to(device)
-    discriminator = Discriminator(ngpu).to(device)
+    generator = HiFaceGenerator().to(device).apply(weights_init)
+    discriminator = Discriminator().to(device).apply(weights_init)
 
-    # Optimizers
+    if (device.type == 'cuda') and (ngpu > 1):
+        generator = nn.DataParallel(generator, list(range(ngpu)))
+        discriminator = nn.DataParallel(discriminator, list(range(ngpu)))
+
     optimizer_g = optim.Adam(generator.parameters(), lr=lr, betas=(0.5, 0.999))
     optimizer_d = optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.999))
+    criterion = nn.BCELoss()
 
-    # Loss function
-    adversarial_loss = nn.BCELoss()
-
-    # Dataset và DataLoader (Ví dụ sử dụng CelebA hoặc dataset hình ảnh khuôn mặt)
-    # dataset = datasets.CelebA(root='./data', transform=transform, download=True)
-    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
     dataloader = data_loader()
     img_list = []
     G_losses = []
     D_losses = []
     iters = 0
 
-    # Huấn luyện HiFace với DCGAN
     for epoch in range(num_epochs):
         for i, (real_images, _) in enumerate(dataloader):
-            real_images = real_images.to(device)
-
-            # --- Huấn luyện Discriminator ---
-            optimizer_d.zero_grad()
-
-            # Phân biệt hình ảnh thật
+            # Huấn luyện Discriminator
             real_labels = torch.ones(batch_size, 1).to(device)
-            dis_real = discriminator(real_images)
-            real_loss = adversarial_loss(dis_real, real_labels)
-
-            # Phân biệt hình ảnh giả từ HiFace
-            z = torch.randn(batch_size, nz).to(device)
-            fake_images = generator(z)  # HiFace tạo ảnh 3D
             fake_labels = torch.zeros(batch_size, 1).to(device)
-            dis_fake = discriminator(fake_images.detach())
-            fake_loss = adversarial_loss(dis_fake, fake_labels)
 
-            # Tổng mất mát của Discriminator
+            # Hình ảnh thật
+            real_images = real_images.to(device)
+            real_output = discriminator(real_images)
+            real_loss = criterion(real_output, real_labels)
+
+            # Hình ảnh giả từ HiFace
+            noise = torch.randn(batch_size, 3, 64, 64).to(device)  # Input noise
+            fake_images = generator(noise)
+            fake_output = discriminator(fake_images.detach())
+            fake_loss = criterion(fake_output, fake_labels)
+
+            # Backpropagation cho Discriminator
             d_loss = real_loss + fake_loss
+            optimizer_d.zero_grad()
             d_loss.backward()
             optimizer_d.step()
 
-            # --- Huấn luyện Generator (HiFace) ---
+            # Huấn luyện HiFaceGenerator
+            fake_output = discriminator(fake_images)
+            g_loss = criterion(fake_output, real_labels)
+
+            # Backpropagation cho Generator
             optimizer_g.zero_grad()
-
-            # Generator cố gắng đánh lừa Discriminator
-            dis_fake = discriminator(fake_images)
-            g_loss = adversarial_loss(dis_fake, real_labels)  # Muốn Discriminator nghĩ rằng ảnh giả là thật
-
             g_loss.backward()
             optimizer_g.step()
 
             G_losses.append(g_loss.item())
             D_losses.append(d_loss.item())
 
-            # In thông tin quá trình huấn luyện
             if i % 50 == 0:
                 print(f"Epoch [{epoch}/{num_epochs}] | Step [{i}/{len(dataloader)}] | D Loss: {d_loss.item()} | G Loss: {g_loss.item()}")
 
             if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
                 with torch.no_grad():
-                    fake = generator(z).detach().cpu()
+                    fake = generator(noise).detach().cpu()
                 img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
 
             iters += 1
