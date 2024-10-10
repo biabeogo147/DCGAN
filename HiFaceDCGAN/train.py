@@ -33,6 +33,7 @@ def train():
     optimizer_d = optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.999))
     criterion = nn.BCELoss()
 
+    fixed_noise = torch.randn(64, nc, image_size, image_size, device=device)
     dataloader = data_loader()
     img_list = []
     G_losses = []
@@ -51,7 +52,7 @@ def train():
             real_loss = criterion(real_output, real_labels)
 
             # Fake images from HiFace
-            noise = torch.randn(batch_size, 3, 64, 64).to(device)  # Input noise
+            noise = torch.randn(batch_size, nc, image_size, image_size).to(device)  # Input noise
             fake_images = generator(noise)
             fake_output = discriminator(fake_images.detach())
             fake_loss = criterion(fake_output, fake_labels)

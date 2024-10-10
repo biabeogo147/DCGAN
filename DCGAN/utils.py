@@ -15,17 +15,22 @@ from torch.utils.data import DataLoader
 import matplotlib.animation as animation
 import torchvision.transforms as transforms
 
+
 manualSeed = 999
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.use_deterministic_algorithms(True)
 
+train_progress_path = 'train_progress'
 dataroot = "../data/celeba"
-workers = 2
-batch_size = 64
+model_path = 'model'
+
+workers = 20
+batch_size = 4096
 image_size = 64
-num_epochs = 5
+num_epochs = 10
 lr = 0.0002
+
 
 # Number of channels in the training images. For color images this is 3
 nc = 3

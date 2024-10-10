@@ -10,15 +10,17 @@ def visual_loss(G_losses, D_losses):
     plt.xlabel("iterations")
     plt.ylabel("Loss")
     plt.legend()
+    plt.savefig(os.path.join(train_progress_path, 'loss.png'))
     plt.show()
 
 
 def visual_g_progression(img_list):
-    plt.axis("off")
-    fig = plt.figure(figsize=(8, 8))
-    ims = [[plt.imshow(np.transpose(i, (1, 2, 0)), animated=True)] for i in img_list]
-    ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
-    HTML(ani.to_jshtml())
+    for idx, img in enumerate(img_list):
+        plt.axis("off")
+        fig = plt.figure(figsize=(8, 8))
+        plt.imshow(np.transpose(img, (1, 2, 0)), animated=True)
+        plt.savefig(os.path.join(train_progress_path, f'epoch_{idx}.png'))
+        plt.close(fig)
 
 
 def compare_real_fake(dataloader, img_list):
@@ -52,8 +54,6 @@ def train():
     # print(netD)
 
     fixed_noise = torch.randn(64, nz, 1, 1, device=device)
-    real_label = 1.
-    fake_label = 0.
 
     optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
     optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
@@ -71,7 +71,8 @@ def train():
             # Real images
             real_cpu = data[0].to(device)
             b_size = real_cpu.size(0)
-            label = torch.full((b_size,), real_label, dtype=torch.float, device=device)
+
+            label = torch.ones(b_size, dtype=torch.float, device=device)
             output = netD(real_cpu).view(-1)
             errD_real = criterion(output, label)
             D_x = output.mean().item()
@@ -79,7 +80,8 @@ def train():
             # Fake images from Generator
             noise = torch.randn(b_size, nz, 1, 1, device=device)
             fake = netG(noise)
-            label.fill_(fake_label)
+
+            label = torch.zeros(b_size, dtype=torch.float, device=device)
             output = netD(fake.detach()).view(-1)
             errD_fake = criterion(output, label)
             D_G_z1 = output.mean().item()
@@ -91,25 +93,23 @@ def train():
             optimizerD.step()
 
             # Train Generator
-            label.fill_(real_label)
+            label = torch.ones(b_size, dtype=torch.float, device=device)
             output = netD(fake).view(-1)
             errG = criterion(output, label)
             D_G_z2 = output.mean().item()
 
             # Backpropagation for Generator
-            netG.zero_grad()
+            optimizerG.zero_grad()
             errG.backward()
             optimizerG.step()
 
             if i % 50 == 0:
-                print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f'
-                      % (epoch, num_epochs, i, len(dataloader),
-                         errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+                print(f'[{epoch}/{num_epochs}][{i}/{len(dataloader)}]\tLoss_D: {errD.item():.4f}\tLoss_G: {errG.item():.4f}\tD(x): {D_x:.4f}\tD(G(z)): {D_G_z1:.4f} / {D_G_z2:.4f}')
 
             G_losses.append(errG.item())
             D_losses.append(errD.item())
 
-            if (iters % 500 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
+            if (iters % 50 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
                 with torch.no_grad():
                     fake = netG(fixed_noise).detach().cpu()
                 img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
@@ -118,6 +118,9 @@ def train():
 
     visual_loss(G_losses, D_losses)
     visual_g_progression(img_list)
+
+    torch.save(netG.state_dict(), os.path.join(model_path, 'generator.pth'))
+    torch.save(netD.state_dict(), os.path.join(model_path, 'discriminator.pth'))
 
 
 if __name__ == "__main__":
