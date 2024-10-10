@@ -41,32 +41,32 @@ def train():
 
     for epoch in range(num_epochs):
         for i, (real_images, _) in enumerate(dataloader):
-            # Huấn luyện Discriminator
+            # Train Discriminator
             real_labels = torch.ones(batch_size, 1).to(device)
             fake_labels = torch.zeros(batch_size, 1).to(device)
 
-            # Hình ảnh thật
+            # Real images
             real_images = real_images.to(device)
             real_output = discriminator(real_images)
             real_loss = criterion(real_output, real_labels)
 
-            # Hình ảnh giả từ HiFace
+            # Fake images from HiFace
             noise = torch.randn(batch_size, 3, 64, 64).to(device)  # Input noise
             fake_images = generator(noise)
             fake_output = discriminator(fake_images.detach())
             fake_loss = criterion(fake_output, fake_labels)
 
-            # Backpropagation cho Discriminator
+            # Backpropagation for Discriminator
             d_loss = real_loss + fake_loss
             optimizer_d.zero_grad()
             d_loss.backward()
             optimizer_d.step()
 
-            # Huấn luyện HiFaceGenerator
+            # Train HiFaceGenerator
             fake_output = discriminator(fake_images)
             g_loss = criterion(fake_output, real_labels)
 
-            # Backpropagation cho Generator
+            # Backpropagation for Generator
             optimizer_g.zero_grad()
             g_loss.backward()
             optimizer_g.step()
