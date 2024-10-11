@@ -14,13 +14,12 @@ def visual_loss(G_losses, D_losses):
     plt.show()
 
 
-def visual_g_progression(img_list):
-    for idx, img in enumerate(img_list):
-        plt.axis("off")
-        fig = plt.figure(figsize=(8, 8))
-        plt.imshow(np.transpose(img, (1, 2, 0)), animated=True)
-        plt.savefig(os.path.join(train_progress_path, f'epoch_{idx}.png'))
-        plt.close(fig)
+def visual_g_progression(fake, epoch):
+    plt.axis("off")
+    fig = plt.figure(figsize=(8, 8))
+    plt.imshow(np.transpose(vutils.make_grid(fake, padding=2, normalize=True), (1, 2, 0)), animated=True)
+    plt.savefig(os.path.join(train_progress_path, f'epoch_{epoch}.png'))
+    plt.close(fig)
 
 
 def compare_real_fake(dataloader, img_list):
@@ -45,28 +44,31 @@ def compare_real_fake(dataloader, img_list):
 def train():
     netG = Generator(ngpu).to(device).apply(weights_init)
     netD = Discriminator(ngpu).to(device).apply(weights_init)
+    optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
+    optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
+
+    last_epoch = 0
+    if (os.path.exists(os.path.join(model_path, 'generator.pth'))) and (os.path.exists(os.path.join(model_path, 'discriminator.pth'))):
+        checkpoint = torch.load("last.pt")
+        last_epoch = checkpoint["epoch"] + 1
+        netG.load_state_dict(checkpoint["model_state_dict_Generator"])
+        netD.load_state_dict(checkpoint["model_state_dict_Discriminator"])
+        optimizerG.load_state_dict(checkpoint["optimizer_state_dict_Generator"])
+        optimizerD.load_state_dict(checkpoint["optimizer_state_dict_Discriminator"])
 
     if (device.type == 'cuda') and (ngpu > 1):
         netG = nn.DataParallel(netG, list(range(ngpu)))
         netD = nn.DataParallel(netD, list(range(ngpu)))
 
-    # print(netG)
-    # print(netD)
-
     fixed_noise = torch.randn(64, nz, 1, 1, device=device)
-
-    optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, 0.999))
-    optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
-    criterion = nn.BCELoss()
-
     dataloader = data_loader()
-    img_list = []
+    criterion = nn.BCELoss()
     G_losses = []
     D_losses = []
-    iters = 0
 
-    for epoch in range(num_epochs):
-        for i, data in enumerate(dataloader, 0):
+    for epoch in range(last_epoch, num_epochs):
+        progress_bar = tqdm(dataloader, colour="green")
+        for i, data in enumerate(progress_bar, 0):
             # Train Discriminator
             # Real images
             real_cpu = data[0].to(device)
@@ -103,24 +105,25 @@ def train():
             errG.backward()
             optimizerG.step()
 
-            if i % 50 == 0:
-                print(f'[{epoch}/{num_epochs}][{i}/{len(dataloader)}]\tLoss_D: {errD.item():.4f}\tLoss_G: {errG.item():.4f}\tD(x): {D_x:.4f}\tD(G(z)): {D_G_z1:.4f} / {D_G_z2:.4f}')
+            progress_bar.set_description(f'[{epoch}/{num_epochs}][{i}/{len(dataloader)}]\tLoss_D: {errD.item():.4f}\tLoss_G: {errG.item():.4f}\tD(x): {D_x:.4f}\tD(G(z)): {D_G_z1:.4f} / {D_G_z2:.4f}')
 
             G_losses.append(errG.item())
             D_losses.append(errD.item())
 
-            if (iters % 50 == 0) or ((epoch == num_epochs - 1) and (i == len(dataloader) - 1)):
-                with torch.no_grad():
-                    fake = netG(fixed_noise).detach().cpu()
-                img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+        with torch.no_grad():
+            fake = netG(fixed_noise).detach().cpu()
+        visual_g_progression(fake, epoch)
 
-            iters += 1
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict_Generator": netG.state_dict(),
+            "model_state_dict_Discriminator": netD.state_dict(),
+            "optimizer_state_dict_Generator": optimizerG.state_dict(),
+            "optimizer_state_dict_Discriminator": optimizerD.state_dict()
+        }
+        torch.save(checkpoint, "last.pt")
 
     visual_loss(G_losses, D_losses)
-    visual_g_progression(img_list)
-
-    torch.save(netG.state_dict(), os.path.join(model_path, 'generator.pth'))
-    torch.save(netD.state_dict(), os.path.join(model_path, 'discriminator.pth'))
 
 
 if __name__ == "__main__":

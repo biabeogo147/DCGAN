@@ -9,6 +9,7 @@ import torch.nn.parallel
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from IPython.display import HTML
+from tqdm.autonotebook import tqdm
 import torchvision.utils as vutils
 import torchvision.datasets as dset
 from torch.utils.data import DataLoader
@@ -28,7 +29,7 @@ model_path = 'model'
 workers = 20
 batch_size = 4096
 image_size = 64
-num_epochs = 10
+num_epochs = 1000
 lr = 0.0002
 
 
