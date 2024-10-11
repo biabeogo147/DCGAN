@@ -49,7 +49,7 @@ def train():
 
     last_epoch = 0
     if (os.path.exists(os.path.join(model_path, 'generator.pth'))) and (os.path.exists(os.path.join(model_path, 'discriminator.pth'))):
-        checkpoint = torch.load("last.pt")
+        checkpoint = torch.load("model/last.pt")
         last_epoch = checkpoint["epoch"] + 1
         netG.load_state_dict(checkpoint["model_state_dict_Generator"])
         netD.load_state_dict(checkpoint["model_state_dict_Discriminator"])
@@ -68,7 +68,7 @@ def train():
 
     for epoch in range(last_epoch, num_epochs):
         progress_bar = tqdm(dataloader, colour="green")
-        for i, data in enumerate(progress_bar, 0):
+        for i, data in enumerate(progress_bar):
             # Train Discriminator
             # Real images
             real_cpu = data[0].to(device)
@@ -105,10 +105,10 @@ def train():
             errG.backward()
             optimizerG.step()
 
-            progress_bar.set_description(f'[{epoch}/{num_epochs}][{i}/{len(dataloader)}]\tLoss_D: {errD.item():.4f}\tLoss_G: {errG.item():.4f}\tD(x): {D_x:.4f}\tD(G(z)): {D_G_z1:.4f} / {D_G_z2:.4f}')
-
             G_losses.append(errG.item())
             D_losses.append(errD.item())
+
+            progress_bar.set_description(f'[{epoch}/{num_epochs}][{i}/{len(dataloader)}]   Loss_D: {errD.item():.4f}   Loss_G: {errG.item():.4f}   D(x): {D_x:.4f}   D(G(z)): {D_G_z1:.4f} / {D_G_z2:.4f}')
 
         with torch.no_grad():
             fake = netG(fixed_noise).detach().cpu()
@@ -121,7 +121,7 @@ def train():
             "optimizer_state_dict_Generator": optimizerG.state_dict(),
             "optimizer_state_dict_Discriminator": optimizerD.state_dict()
         }
-        torch.save(checkpoint, "last.pt")
+        torch.save(checkpoint, os.path.join(model_path, "last.pt"))
 
     visual_loss(G_losses, D_losses)
 
