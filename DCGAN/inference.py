@@ -4,8 +4,11 @@ from model import Generator
 
 def inference():
     netG = Generator(ngpu).to(device)
-    netG.load_state_dict(torch.load(os.path.join(model_path, 'generator.pth')))
-    netG.eval()
+    if os.path.exists(os.path.join(model_path, 'last.pt')):
+        print("Loading checkpoint...")
+        checkpoint = torch.load(os.path.join(model_path, 'last.pt'))
+        netG.load_state_dict(checkpoint["model_state_dict_Generator"])
+        print("Checkpoint loaded")
 
     fixed_noise = torch.randn(64, nz, 1, 1, device=device)
     fake = netG(fixed_noise).detach().cpu()

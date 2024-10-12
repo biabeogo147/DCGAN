@@ -48,13 +48,15 @@ def train():
     optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, 0.999))
 
     last_epoch = 0
-    if (os.path.exists(os.path.join(model_path, 'generator.pth'))) and (os.path.exists(os.path.join(model_path, 'discriminator.pth'))):
-        checkpoint = torch.load("model/last.pt")
+    if os.path.exists(os.path.join(model_path, 'last.pt')):
+        print("Loading checkpoint...")
+        checkpoint = torch.load(os.path.join(model_path, 'last.pt'))
         last_epoch = checkpoint["epoch"] + 1
         netG.load_state_dict(checkpoint["model_state_dict_Generator"])
         netD.load_state_dict(checkpoint["model_state_dict_Discriminator"])
         optimizerG.load_state_dict(checkpoint["optimizer_state_dict_Generator"])
         optimizerD.load_state_dict(checkpoint["optimizer_state_dict_Discriminator"])
+        print("Checkpoint loaded")
 
     if (device.type == 'cuda') and (ngpu > 1):
         netG = nn.DataParallel(netG, list(range(ngpu)))
@@ -66,6 +68,7 @@ def train():
     G_losses = []
     D_losses = []
 
+    print("Starting Training Loop...")
     for epoch in range(last_epoch, num_epochs):
         progress_bar = tqdm(dataloader, colour="green")
         for i, data in enumerate(progress_bar):
