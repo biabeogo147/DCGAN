@@ -22,50 +22,67 @@ class SiameseNetwork(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        # Fully connected layers to get final feature vector
-        self.fc = nn.Sequential(
-            nn.Linear(256 * 30 * 30, 1024),  # Flatten the conv output
+        # Fully connected layers for identity features
+        self.fc_identity = nn.Sequential(
+            nn.Linear(256 * 30 * 30, 1024),
             nn.ReLU(inplace=True),
             nn.Linear(1024, 512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 256)  # Output: 256D feature vector
+            nn.Linear(512, 256)  # Output: 256D identity feature vector
+        )
+
+        # Fully connected layers for expression features
+        self.fc_expression = nn.Sequential(
+            nn.Linear(256 * 30 * 30, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, 256)  # Output: 256D expression feature vector
+        )
+
+        # Fully connected layers for albedo features
+        self.fc_albedo = nn.Sequential(
+            nn.Linear(256 * 30 * 30, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, 256)  # Output: 256D albedo feature vector
         )
 
     def forward(self, x):
         x = self.conv(x)  # Convolutional feature extraction
         x = x.view(x.size(0), -1)  # Flatten the output from conv layers
-        x = self.fc(x)  # Fully connected layers for final feature vector
-        return x
+
+        # Identity, expression, and albedo feature extraction
+        identity_features = self.fc_identity(x)
+        expression_features = self.fc_expression(x)
+        albedo_features = self.fc_albedo(x)
+        return identity_features, expression_features, albedo_features
 
 
 class MorphableFaceModel(nn.Module):
-    def __init__(self, num_identity_basis=80, num_expression_basis=64, num_albedo_basis=80):
+    def __init__(self, identity_size, expression_size, albedo_size):
         super(MorphableFaceModel, self).__init__()
 
-        self.num_identity_basis = num_identity_basis
-        self.num_expression_basis = num_expression_basis
+        # Identity basis (num_identity_basis, num_vertices, 3)
+        self.identity_basis = nn.Parameter(torch.randn(identity_size, 1000, 3))
 
-        # basis (Identity + Expression)
-        self.identity_basis = nn.Parameter(torch.randn(num_identity_basis, 1000, 3))  # Identity basis (num_identity_basis, num_vertices, 3)
-        self.expression_basis = nn.Parameter(torch.randn(num_expression_basis, 1000, 3))  # Expression basis (num_expression_basis, num_vertices, 3)
+        # Expression basis (num_expression_basis, num_vertices, 3)
+        self.expression_basis = nn.Parameter(torch.randn(expression_size, 1000, 3))
 
-        # basis for albedo
-        self.albedo_basis = nn.Parameter(torch.randn(num_albedo_basis, 1000, 3))  # Albedo basis (num_albedo_basis, num_vertices, 3)
+        # Albedo basis (num_albedo_basis, num_vertices, 3)
+        self.albedo_basis = nn.Parameter(torch.randn(albedo_size, 1000, 3))
 
         self.mean_face = nn.Parameter(torch.randn(1000, 3))  # (num_vertices, 3)
         self.mean_albedo = nn.Parameter(torch.rand(1000, 3))  # (num_vertices, 3)
 
     def forward(self, identity_params, expression_params, albedo_params):
-        batch_size = identity_params.shape[0]
+        # Identity shape transformation (batch_size, num_vertices, 3)
+        identity_shape = torch.einsum('bi,ijk->bjk', identity_params, self.identity_basis)
 
-        # 1. Tính toán hình dạng khuôn mặt từ tham số identity và expression
-        identity_shape = torch.matmul(identity_params, self.identity_basis.view(identity_params.size(1), -1)).view(batch_size, 1000, 3)
-        expression_shape = torch.matmul(expression_params, self.expression_basis.view(expression_params.size(1), -1)).view(batch_size, 1000, 3)
+        # Expression shape transformation (batch_size, num_vertices, 3)
+        expression_shape = torch.einsum('be,ejk->bjk', expression_params, self.expression_basis)
+
+        # Albedo transformation (batch_size, num_vertices, 3)
+        albedo = torch.einsum('ba,ajk->bjk', albedo_params, self.albedo_basis)
 
         vertices = self.mean_face + identity_shape + expression_shape  # (batch_size, num_vertices, 3)
-
-        albedo = torch.matmul(albedo_params, self.albedo_basis.view(self.num_albedo_basis, -1))  # (batch_size, 1000 * 3)
-        albedo = albedo.view(batch_size, 1000, 3)  # (batch_size, num_vertices, 3)
         albedo = self.mean_albedo + albedo  # (batch_size, num_vertices, 3)
 
         return vertices, albedo
@@ -113,15 +130,17 @@ class Full3DModel(nn.Module):
     def __init__(self, image_size=256, device='cpu'):
         super(Full3DModel, self).__init__()
         self.siamese = SiameseNetwork()
-        self.face_model = MorphableFaceModel()
+
+        # Fake input for siamese network
+        dummy_input = torch.randn(1, 3, 240, 240)
+        identity_features, expression_features, albedo_features = self.siamese(dummy_input)
+
+        self.face_model = MorphableFaceModel(identity_features.size(1), expression_features.size(1), albedo_features.size(1))
         self.renderer = DifferentiableRenderer(image_size=image_size, device=device)
 
     def forward(self, images, faces):
         # 1. Feature extraction with Siamese Network
-        features = self.siamese(images)
-        identity_params = features[:, :80]  # First 80 dimensions for identity
-        expression_params = features[:, 80:144]  # Next 64 dimensions for expression
-        albedo_params = features[:, 144:224]  # Next 80 dimensions for albedo
+        identity_params, expression_params, albedo_params = self.siamese(images)
 
         # 2. Create 3D Morphable Face Model
         vertices, albedo = self.face_model(identity_params, expression_params, albedo_params)
