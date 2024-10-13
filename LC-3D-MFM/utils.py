@@ -8,25 +8,32 @@ import torch.utils.data
 import torch.nn.parallel
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 from IPython.display import HTML
+from tqdm.autonotebook import tqdm
 import torchvision.utils as vutils
+import torchvision.models as models
 import torchvision.datasets as dset
 from torch.utils.data import DataLoader
-from torchvision.utils import save_image
 import matplotlib.animation as animation
 import torchvision.transforms as transforms
+
 
 manualSeed = 999
 random.seed(manualSeed)
 torch.manual_seed(manualSeed)
 torch.use_deterministic_algorithms(True)
 
+train_progress_path = 'train_progress'
 dataroot = "../data/celeba"
-workers = 2
-batch_size = 64
+model_path = 'model'
+
+workers = 20
+batch_size = 4096
 image_size = 64
-num_epochs = 5
+num_epochs = 1000
 lr = 0.0002
+
 
 # Number of channels in the training images. For color images this is 3
 nc = 3
