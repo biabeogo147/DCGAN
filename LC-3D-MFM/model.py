@@ -2,6 +2,9 @@ from utils import *
 from pytorch3d.renderer import *
 from pytorch3d.structures import Meshes
 
+import warnings
+warnings.filterwarnings("ignore")
+
 
 class SiameseNetwork(nn.Module):
     def __init__(self):
@@ -94,34 +97,21 @@ class DifferentiableRenderer(nn.Module):
 
         self.device = device
         self.image_size = image_size
-
-        # Camera settings
-        self.cameras = PerspectiveCameras(device=device)
-
-        # Lighting setup
-        self.lights = PointLights(device=device, location=[[0.0, 0.0, -3.0]])
-
-        # Rasterization settings
+        self.cameras = PerspectiveCameras(device=self.device)
+        self.lights = PointLights(location=[[0.0, 0.0, -3.0]], device=self.device)
         self.raster_settings = RasterizationSettings(
             image_size=image_size,
             blur_radius=0.0,
             faces_per_pixel=1,
         )
-
-        # Shader settings
         self.renderer = MeshRenderer(
             rasterizer=MeshRasterizer(cameras=self.cameras, raster_settings=self.raster_settings),
-            shader=HardPhongShader(device=device, cameras=self.cameras, lights=self.lights)
+            shader=HardPhongShader(device=self.device, cameras=self.cameras, lights=self.lights)
         )
 
     def forward(self, vertices, faces, albedo):
-        # Textures (albedo) setup for the mesh
         textures = TexturesVertex(verts_features=albedo)
-
-        # Create the mesh structure using PyTorch3D's Meshes
-        mesh = Meshes(verts=vertices, faces=faces, textures=textures)
-
-        # Render the mesh to a 2D image
+        mesh = Meshes(verts=vertices, faces=faces, textures=textures).to(self.device)
         rendered_image = self.renderer(mesh)
         return rendered_image
 
@@ -136,7 +126,7 @@ class Full3DModel(nn.Module):
         identity_features, expression_features, albedo_features = self.siamese(dummy_input)
 
         self.face_model = MorphableFaceModel(identity_features.size(1), expression_features.size(1), albedo_features.size(1))
-        self.renderer = DifferentiableRenderer(image_size=image_size, device=device)
+        self.renderer = DifferentiableRenderer(image_size=image_size)
 
     def forward(self, images, faces):
         # 1. Feature extraction with Siamese Network
