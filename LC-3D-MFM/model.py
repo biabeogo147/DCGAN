@@ -171,7 +171,7 @@ class PerceptualLoss(nn.Module):
 
 
 class FullLoss(nn.Module):
-    def __init__(self, perceptual_loss,
+    def __init__(self,
                  lambda_land=1.0, lambda_seg=1.0,
                  lambda_pho=1.0, lambda_per=1.0,
                  lambda_smo=0.1, lambda_dis=0.01):
