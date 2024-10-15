@@ -21,7 +21,7 @@ class ImageFormation(nn.Module):
         self.sh_coeffs = nn.Parameter(torch.randn(B**2))
 
         # Rasterizer có thể vi phân (đây chỉ là placeholder - triển khai thực tế sẽ phức tạp hơn)
-        self.rasterizer = DifferentiableRasterizer(image_size)
+        self.rasterizer = DifferentiableRenderer(image_size)
 
     def compute_rotation_matrix(self):
         # Chuyển đổi góc Euler thành ma trận xoay
@@ -81,18 +81,6 @@ class ImageFormation(nn.Module):
         rendered_image = self.rasterizer(projected_vertices, vertex_colors)
 
         return rendered_image
-
-
-class DifferentiableRasterizer(nn.Module):
-    def __init__(self, image_size):
-        super(DifferentiableRasterizer, self).__init__()
-        self.image_size = image_size
-
-    def forward(self, projected_vertices, vertex_colors):
-        # Placeholder cho rasterization có thể vi phân
-        # Triển khai thực tế sẽ liên quan đến các hoạt động phức tạp hơn
-        # như rasterization tam giác, z-buffering, và nội suy barycentric
-        return torch.zeros(1, 3, *self.image_size)  # Trả về một hình ảnh trống tạm thời
 
 
 class ImageFormation_2:
