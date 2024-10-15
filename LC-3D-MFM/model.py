@@ -1,221 +1,161 @@
 from utils import *
-from pytorch3d.renderer import *
-from pytorch3d.structures import Meshes
-
-import warnings
-warnings.filterwarnings("ignore")
 
 
-class SiameseNetwork(nn.Module):
-    def __init__(self):
-        super(SiameseNetwork, self).__init__()
+class FaceParameterNet(nn.Module):
+    def __init__(self, identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=27, pose_dim=6):
+        super(FaceParameterNet, self).__init__()
 
-        # Convolutional layers for feature extraction, with kernel size = 3
-        self.conv = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),  # Output: 64x120x120
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # Output: 128x60x60
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Output: 256x30x30
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True)
+        self.expression_net = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, expression_dim)
         )
 
-        # Fully connected layers for identity features
-        self.fc_identity = nn.Sequential(
-            nn.Linear(256 * 30 * 30, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, 256)  # Output: 256D identity feature vector
+        self.illumination_net = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, illumination_dim)
         )
 
-        # Fully connected layers for expression features
-        self.fc_expression = nn.Sequential(
-            nn.Linear(256 * 30 * 30, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, 256)  # Output: 256D expression feature vector
+        self.pose_net = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, pose_dim)
         )
 
-        # Fully connected layers for albedo features
-        self.fc_albedo = nn.Sequential(
-            nn.Linear(256 * 30 * 30, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, 256)  # Output: 256D albedo feature vector
+        self.identity_reflectance_net = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, identity_dim + reflectance_dim)
         )
 
-    def forward(self, x):
-        x = self.conv(x)  # Convolutional feature extraction
-        x = x.view(x.size(0), -1)  # Flatten the output from conv layers
+    def forward(self, per_frame_features, pooled_features, isFirst=False):
+        expression = self.expression_net(per_frame_features)
+        illumination = self.illumination_net(per_frame_features)
+        pose = self.pose_net(per_frame_features)
 
-        # Identity, expression, and albedo feature extraction
-        identity_features = self.fc_identity(x)
-        expression_features = self.fc_expression(x)
-        albedo_features = self.fc_albedo(x)
-        return identity_features, expression_features, albedo_features
+        identity_reflectance = torch.zeros(1, pooled_features.shape[0])
+        if isFirst:
+            identity_reflectance = self.identity_reflectance_net(pooled_features)
+        identity = identity_reflectance[:, :80]
+        reflectance = identity_reflectance[:, 80:]
 
-
-class MorphableFaceModel(nn.Module):
-    def __init__(self, identity_size, expression_size, albedo_size):
-        super(MorphableFaceModel, self).__init__()
-
-        # Identity basis (num_identity_basis, num_vertices, 3)
-        self.identity_basis = nn.Parameter(torch.randn(identity_size, 1000, 3))
-
-        # Expression basis (num_expression_basis, num_vertices, 3)
-        self.expression_basis = nn.Parameter(torch.randn(expression_size, 1000, 3))
-
-        # Albedo basis (num_albedo_basis, num_vertices, 3)
-        self.albedo_basis = nn.Parameter(torch.randn(albedo_size, 1000, 3))
-
-        self.mean_face = nn.Parameter(torch.randn(1000, 3))  # (num_vertices, 3)
-        self.mean_albedo = nn.Parameter(torch.rand(1000, 3))  # (num_vertices, 3)
-
-    def forward(self, identity_params, expression_params, albedo_params):
-        # Identity shape transformation (batch_size, num_vertices, 3)
-        identity_shape = torch.einsum('bi,ijk->bjk', identity_params, self.identity_basis)
-
-        # Expression shape transformation (batch_size, num_vertices, 3)
-        expression_shape = torch.einsum('be,ejk->bjk', expression_params, self.expression_basis)
-
-        # Albedo transformation (batch_size, num_vertices, 3)
-        albedo = torch.einsum('ba,ajk->bjk', albedo_params, self.albedo_basis)
-
-        vertices = self.mean_face + identity_shape + expression_shape  # (batch_size, num_vertices, 3)
-        albedo = self.mean_albedo + albedo  # (batch_size, num_vertices, 3)
-
-        return vertices, albedo
+        return identity, reflectance, expression, illumination, pose
 
 
-class DifferentiableRenderer(nn.Module):
-    def __init__(self, image_size=256, device='cpu'):
-        super(DifferentiableRenderer, self).__init__()
+class SiameseModel(nn.Module):
+    def __init__(self, identity_dim=80, expression_dim=64,
+                 reflectance_dim=80, illumination_dim=27, pose_dim=6):
+        super(SiameseModel, self).__init__()
 
-        self.device = device
-        self.image_size = image_size
-        self.cameras = PerspectiveCameras(device=self.device)
-        self.lights = PointLights(location=[[0.0, 0.0, -3.0]], device=self.device)
-        self.raster_settings = RasterizationSettings(
-            image_size=image_size,
-            blur_radius=0.0,
-            faces_per_pixel=1,
-        )
-        self.renderer = MeshRenderer(
-            rasterizer=MeshRasterizer(cameras=self.cameras, raster_settings=self.raster_settings),
-            shader=HardPhongShader(device=self.device, cameras=self.cameras, lights=self.lights)
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Flatten(),
+            nn.Linear(256 * 15 * 15, 512),
+            nn.ReLU(),
         )
 
-    def forward(self, vertices, faces, albedo):
-        textures = TexturesVertex(verts_features=albedo)
-        mesh = Meshes(verts=vertices, faces=faces, textures=textures).to(self.device)
-        rendered_image = self.renderer(mesh)
-        return rendered_image
+        self.face_param_net = FaceParameterNet(identity_dim, expression_dim,
+                                               reflectance_dim, illumination_dim, pose_dim)
+
+    def forward(self, frames):
+        per_frame_features = []
+        identities, reflectances, expressions, illuminations, poses = [], [], [], [], []
+
+        for i in range(frames.shape[0]):
+            x = frames[i]
+            features = self.feature_extractor(x)
+            per_frame_features.append(features)
+
+        # (num_frames, feature_dim) -> (feature_dim)
+        pooled_features = torch.mean(torch.stack(per_frame_features), dim=0)
+        pooled_features = self.feature_extractor(pooled_features)
+
+        for i in range(self.num_frames):
+            identity, reflectance, expression, illumination, pose = self.face_param_net(per_frame_features[i],
+                                                                                        pooled_features,
+                                                                                        i == 0)
+
+            expressions.append(expression)
+            illuminations.append(illumination)
+            poses.append(pose)
+
+            if i == 0:
+                identities.append(identity)
+                reflectances.append(reflectance)
+
+        return identities, reflectances, expressions, illuminations, poses
 
 
-class Full3DModel(nn.Module):
-    def __init__(self, image_size=256, device='cpu'):
-        super(Full3DModel, self).__init__()
-        self.siamese = SiameseNetwork()
+class FaceModel(nn.Module):
+    def __init__(self, num_vertices=60000, num_graph_nodes=512, identity_dim=80, expression_dim=64, reflectance_dim=80):
+        super(FaceModel, self).__init__()
 
-        # Fake input for siamese network
-        dummy_input = torch.randn(1, 3, 240, 240)
-        identity_features, expression_features, albedo_features = self.siamese(dummy_input)
+        self.identity_model_graph = nn.Linear(identity_dim, num_graph_nodes * 3)
+        self.expression_model_graph = nn.Linear(expression_dim, num_graph_nodes * 3)
+        self.reflectance_model = nn.Linear(reflectance_dim, num_vertices * 3)
 
-        self.face_model = MorphableFaceModel(identity_features.size(1), expression_features.size(1), albedo_features.size(1))
-        self.renderer = DifferentiableRenderer(image_size=image_size)
+        # Fixed upsampling matrix for identity and expression
+        """ We should precompute this before training """
+        self.U = torch.randn(num_vertices * 3, num_graph_nodes * 3)
 
-    def forward(self, images, faces):
-        # 1. Feature extraction with Siamese Network
-        identity_params, expression_params, albedo_params = self.siamese(images)
+        """ We should use mean_face value from [4] in paper """
+        self.mean_face = torch.zeros(1, num_vertices * 3)
+        self.mean_face_reflectance = torch.zeros(1, num_vertices * 3)
 
-        # 2. Create 3D Morphable Face Model
-        vertices, albedo = self.face_model(identity_params, expression_params, albedo_params)
+    def forward(self, identity_params, expression_params, reflectance_params):
+        identity_graph = self.identity_model_graph(identity_params)
+        expression_graph = self.expression_model_graph(expression_params)
 
-        # 3. Render the 3D model into a 2D image
-        rendered_image = self.renderer(vertices, faces, albedo)
+        # Upsampling
+        identity_geometry = torch.matmul(self.U, identity_graph.T).T
+        expression_geometry = torch.matmul(self.U, expression_graph.T).T
 
-        return rendered_image
+        face_geometry = self.mean_face + identity_geometry + expression_geometry
+        reflectance = self.mean_face_reflectance + self.reflectance_model(reflectance_params)
 
+        """ Note """
+        face_geometry = face_geometry.view(identity_params.shape[0], -1, 3)
+        reflectance = reflectance.view(reflectance_params.shape[0], -1, 3)
 
-# ----- Perceptual Loss using VGG16 -----
-class PerceptualLoss(nn.Module):
-    def __init__(self):
-        super(PerceptualLoss, self).__init__()
-
-        vgg = models.vgg16(pretrained=True).features
-        self.selected_layers = nn.Sequential(*list(vgg.children())[:23])
-
-        # Freeze the parameters of VGG16 -> No Train
-        for param in self.selected_layers.parameters():
-            param.requires_grad = False
-
-    def forward(self, input_img, target_img):
-        input_features = self.selected_layers(input_img)
-        target_features = self.selected_layers(target_img)
-        perceptual_loss = F.mse_loss(input_features, target_features)
-        return perceptual_loss
+        return face_geometry, reflectance
 
 
-class FullLoss(nn.Module):
-    def __init__(self,
-                 lambda_land=1.0, lambda_seg=1.0,
-                 lambda_pho=1.0, lambda_per=1.0,
-                 lambda_smo=0.1, lambda_dis=0.01):
-        super(FullLoss, self).__init__()
-        #  perceptual_loss (nn.Module): Hàm perceptual loss sử dụng VGG16.
-        self.perceptual_loss = PerceptualLoss()
-        self.lambda_land = lambda_land
-        self.lambda_seg = lambda_seg
-        self.lambda_pho = lambda_pho
-        self.lambda_per = lambda_per
-        self.lambda_smo = lambda_smo
-        self.lambda_dis = lambda_dis
+class FullFaceModel(nn.Module):
+    def __init__(self, num_vertices=60000, num_graph_nodes=512,
+                 identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=27, pose_dim=6):
+        super(FullFaceModel, self).__init__()
 
-    def forward(self,
-                landmarks_pred, landmarks_true,
-                lip_seg_pred, lip_seg_true,
-                rendered_img, real_img,
-                geometry_pred, smoothness_graph,
-                expression_params):
+        self.siamese_model = SiameseModel(identity_dim=identity_dim,
+                                          expression_dim=expression_dim, reflectance_dim=reflectance_dim,
+                                          illumination_dim=illumination_dim, pose_dim=pose_dim)
 
-        # 1. Landmark Consistency Loss (Lland)
-        Lland = F.mse_loss(landmarks_pred, landmarks_true)
+        self.face_model = FaceModel(num_vertices=num_vertices, num_graph_nodes=num_graph_nodes,
+                                    identity_dim=identity_dim, expression_dim=expression_dim,
+                                    reflectance_dim=reflectance_dim)
 
-        # 2. Segmentation Consistency Loss (Lseg)
-        Lseg = F.mse_loss(lip_seg_pred, lip_seg_true)
+    def forward(self, frames):
+        identities, reflectances, expressions, illuminations, poses = self.siamese_model(frames)
 
-        # 3. Photometric Loss (Lpho)
-        Lpho = F.l1_loss(rendered_img, real_img)
+        identity_avg = torch.mean(torch.stack(identities), dim=0)
+        expression_avg = torch.mean(torch.stack(expressions), dim=0)
+        reflectance_avg = torch.mean(torch.stack(reflectances), dim=0)
 
-        # 4. Perceptual Loss (Lper) using VGG16
-        Lper = self.perceptual_loss(rendered_img, real_img)
+        face_geometry, reflectance_output = self.face_model(identity_avg, expression_avg, reflectance_avg)
 
-        # 5. Geometry Smoothness Loss (Lsmo)
-        Lsmo = self.geometry_smoothness_loss(geometry_pred, smoothness_graph)
-
-        # 6. Disentanglement Loss (Ldis)
-        Ldis = torch.mean(expression_params ** 2)
-
-        # Tổng hợp các hàm mất mát với trọng số
-        total_loss = (self.lambda_land * Lland +
-                      self.lambda_seg * Lseg +
-                      self.lambda_pho * Lpho +
-                      self.lambda_per * Lper +
-                      self.lambda_smo * Lsmo +
-                      self.lambda_dis * Ldis)
-        return total_loss
-
-    def geometry_smoothness_loss(self, geometry_pred, smoothness_graph):
-        smoothness_loss = 0.0
-        for g in geometry_pred:
-            for neighbor in smoothness_graph[g]:
-                smoothness_loss += torch.mean((geometry_pred[g] - geometry_pred[neighbor]) ** 2)
-        return smoothness_loss
+        return face_geometry, reflectance_output, illuminations, poses
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass
