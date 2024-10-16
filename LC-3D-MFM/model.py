@@ -2,7 +2,7 @@ from utils import *
 
 
 class FaceParameterNet(nn.Module):
-    def __init__(self, identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=27, pose_dim=6):
+    def __init__(self, identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=9, pose_dim=6):
         super(FaceParameterNet, self).__init__()
 
         self.expression_net = nn.Sequential(
@@ -45,7 +45,7 @@ class FaceParameterNet(nn.Module):
 
 class SiameseModel(nn.Module):
     def __init__(self, identity_dim=80, expression_dim=64,
-                 reflectance_dim=80, illumination_dim=27, pose_dim=6):
+                 reflectance_dim=80, illumination_dim=9, pose_dim=6):
         super(SiameseModel, self).__init__()
 
         self.feature_extractor = nn.Sequential(
@@ -125,7 +125,6 @@ class FaceModel(nn.Module):
         face_geometry = self.mean_face + identity_geometry + expression_geometry
         reflectance = self.mean_face_reflectance + self.reflectance_model(reflectance_params)
 
-        """ Note """
         face_geometry = face_geometry.view(identity_params.shape[0], -1, 3)
         reflectance = reflectance.view(reflectance_params.shape[0], -1, 3)
 
@@ -134,7 +133,7 @@ class FaceModel(nn.Module):
 
 class FullFaceModel(nn.Module):
     def __init__(self, num_vertices=60000, num_graph_nodes=512,
-                 identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=27, pose_dim=6):
+                 identity_dim=80, expression_dim=64, reflectance_dim=80, illumination_dim=9, pose_dim=6):
         super(FullFaceModel, self).__init__()
 
         self.siamese_model = SiameseModel(identity_dim=identity_dim,
@@ -147,13 +146,9 @@ class FullFaceModel(nn.Module):
 
     def forward(self, frames):
         identities, reflectances, expressions, illuminations, poses = self.siamese_model(frames)
-
-        identity_avg = torch.mean(torch.stack(identities), dim=0)
-        expression_avg = torch.mean(torch.stack(expressions), dim=0)
-        reflectance_avg = torch.mean(torch.stack(reflectances), dim=0)
-
-        face_geometry, reflectance_output = self.face_model(identity_avg, expression_avg, reflectance_avg)
-
+        face_geometry, reflectance_output = self.face_model(identities,
+                                                            torch.mean(torch.stack(expressions), dim=0),
+                                                            reflectances)
         return face_geometry, reflectance_output, illuminations, poses
 
 

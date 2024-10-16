@@ -1,222 +1,201 @@
 from utils import *
-from pytorch3d.renderer import *
+from pytorch3d.renderer import (
+    FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
+    SoftPhongShader, TexturesVertex
+)
 from pytorch3d.structures import Meshes
 
 
-class ImageFormation(nn.Module):
-    def __init__(self, image_size=(256, 256), B=3):
-        super(ImageFormation, self).__init__()
-        self.image_size = image_size
-        self.B = B  # Số lượng hệ số hài cầu
-
-        # Thông số camera (có thể được học hoặc đặt bên ngoài)
-        self.focal_length = nn.Parameter(torch.tensor([1000.0, 1000.0]))
-        self.principal_point = nn.Parameter(torch.tensor([image_size[0]/2, image_size[1]/2]))
-
-        # Thông số tư thế
-        self.rotation = nn.Parameter(torch.zeros(3))  # Góc Euler
-        self.translation = nn.Parameter(torch.zeros(3))
-
-        # Thông số ánh sáng
-        self.sh_coeffs = nn.Parameter(torch.randn(B**2))
-
-        # Rasterizer có thể vi phân (đây chỉ là placeholder - triển khai thực tế sẽ phức tạp hơn)
-        self.rasterizer = DifferentiableRenderer(image_size)
-
-    def compute_rotation_matrix(self):
-        # Chuyển đổi góc Euler thành ma trận xoay
-        # Đây là phiên bản đơn giản hóa - bạn thường sẽ sử dụng một phương pháp mạnh mẽ hơn
-        rx, ry, rz = self.rotation
-        Rx = torch.tensor([[1, 0, 0],
-                           [0, torch.cos(rx), -torch.sin(rx)],
-                           [0, torch.sin(rx), torch.cos(rx)]])
-        Ry = torch.tensor([[torch.cos(ry), 0, torch.sin(ry)],
-                           [0, 1, 0],
-                           [-torch.sin(ry), 0, torch.cos(ry)]])
-        Rz = torch.tensor([[torch.cos(rz), -torch.sin(rz), 0],
-                           [torch.sin(rz), torch.cos(rz), 0],
-                           [0, 0, 1]])
-        return Rz @ Ry @ Rx
-
-    def apply_pose(self, vertices):
-        R = self.compute_rotation_matrix()
-        return vertices @ R.T + self.translation
-
-    def project_3d_to_2d(self, vertices_3d):
-        # Phép chiếu phối cảnh
-        x, y, z = vertices_3d.unbind(-1)
-        fx, fy = self.focal_length
-        cx, cy = self.principal_point
-        x_proj = fx * x / z + cx
-        y_proj = fy * y / z + cy
-        return torch.stack([x_proj, y_proj], dim=-1)
-
-    def compute_illumination(self, vertices, normals, reflectance):
-        # Tính toán ánh sáng sử dụng hài cầu
-        # Đây là phiên bản đơn giản hóa - triển khai thực tế sẽ liên quan đến các tính toán SH phức tạp hơn
-        illumination = torch.zeros_like(vertices)
-        for l in range(self.B**2):
-            illumination += self.sh_coeffs[l] * self.evaluate_sh_basis(l, normals)
-        return reflectance * illumination
-
-    def evaluate_sh_basis(self, l, normals):
-        # Placeholder cho việc đánh giá hàm cơ sở hài cầu
-        # Triển khai thực tế sẽ tính toán các hàm cơ sở SH thích hợp
-        return torch.ones_like(normals[..., 0])
-
-    def forward(self, face_geometry, reflectance):
-        # Áp dụng biến đổi tư thế
-        posed_vertices = self.apply_pose(face_geometry)
-
-        # Chiếu các đỉnh 3D thành 2D
-        projected_vertices = self.project_3d_to_2d(posed_vertices)
-
-        # Tính toán vector pháp tuyến của đỉnh (đơn giản hóa - tính toán thực tế sẽ phức tạp hơn)
-        normals = nn.functional.normalize(posed_vertices, dim=-1)
-
-        # Tính toán ánh sáng
-        vertex_colors = self.compute_illumination(posed_vertices, normals, reflectance)
-
-        # Render hình ảnh sử dụng rasterization có thể vi phân
-        rendered_image = self.rasterizer(projected_vertices, vertex_colors)
-
-        return rendered_image
-
-
-class ImageFormation_2:
-    def __init__(self, img_size=240):
-        self.img_size = img_size
-
-    def euler_to_rotation_matrix(self, alpha, beta, gamma):
-        R_x = torch.tensor([[1, 0, 0],
-                            [0, torch.cos(alpha), -torch.sin(alpha)],
-                            [0, torch.sin(alpha), torch.cos(alpha)]])
-        R_y = torch.tensor([[torch.cos(beta), 0, torch.sin(beta)],
-                            [0, 1, 0],
-                            [-torch.sin(beta), 0, torch.cos(beta)]])
-        R_z = torch.tensor([[torch.cos(gamma), -torch.sin(gamma), 0],
-                            [torch.sin(gamma), torch.cos(gamma), 0],
-                            [0, 0, 1]])
-
-        R = torch.mm(R_z, torch.mm(R_y, R_x))
-        return R
-
-    def apply_pose(self, face_geometry, pose):
-        alpha, beta, gamma = pose[:, 0], pose[:, 1], pose[:, 2]
-        translation_vector = pose[:, 3:6]
-
-        rotation_matrix = self.euler_to_rotation_matrix(alpha, beta, gamma).to(face_geometry.device)
-
-        face_geometry_transformed = torch.matmul(face_geometry, rotation_matrix.T)
-        face_geometry_transformed += translation_vector[:, None, :]
-
-        return face_geometry_transformed
-
-    def perspective_projection(self, face_geometry_transformed, focal_length=800):
-        projected_2d = face_geometry_transformed[:, :, :2] / (face_geometry_transformed[:, :, 2:] + 1e-5)
-
-        projected_2d *= focal_length
-        projected_2d += self.img_size // 2
-
-        return projected_2d
-
-    def apply_lighting(self, face_geometry_transformed, reflectance, illumination):
-        batch_size = face_geometry_transformed.size(0)
-        num_vertices = face_geometry_transformed.size(1)
-
-        face_normals = torch.randn(batch_size, num_vertices, 3)
-        face_normals = face_normals / (torch.norm(face_normals, dim=-1, keepdim=True) + 1e-5)
-
-        # Ánh sáng: spherical harmonics (9 thành phần mỗi kênh màu RGB)
-        sh_basis = self.compute_spherical_harmonics(face_normals)  # (batch_size, num_vertices, 9)
-
-        # Tính toán ánh sáng bằng cách nhân hệ số spherical harmonics (illumination) với cơ sở spherical harmonics
-        illumination_r = (illumination[:, :9].view(batch_size, 9, 1) * sh_basis).sum(dim=1)
-        illumination_g = (illumination[:, 9:18].view(batch_size, 9, 1) * sh_basis).sum(dim=1)
-        illumination_b = (illumination[:, 18:].view(batch_size, 9, 1) * sh_basis).sum(dim=1)
-
-        # Kết quả ánh sáng tổng hợp cho các đỉnh
-        illumination_combined = torch.stack([illumination_r, illumination_g, illumination_b], dim=-1)
-
-        # Kết hợp với phản xạ da (reflectance) để tính màu sắc cuối cùng
-        colors = reflectance * illumination_combined
-
-        return colors
-
-    # Hàm tính toán cơ sở spherical harmonics cho vector pháp tuyến
-    def compute_spherical_harmonics(self, normals):
-        """
-        Tính toán cơ sở spherical harmonics bậc 2 cho vector pháp tuyến.
-        """
-        x = normals[:, :, 0]
-        y = normals[:, :, 1]
-        z = normals[:, :, 2]
-
-        sh = torch.stack([
-            torch.ones_like(x),  # L_0^0 (hằng số)
-            y,  # L_1^-1
-            z,  # L_1^0
-            x,  # L_1^1
-            x * y,  # L_2^-2
-            y * z,  # L_2^-1
-            3 * z ** 2 - 1,  # L_2^0
-            x * z,  # L_2^1
-            x ** 2 - y ** 2  # L_2^2
-        ], dim=-1)  # (batch_size, num_vertices, 9)
-
-        return sh
-
-    # Hàm kết xuất ảnh 2D
-    def render_image(self, face_geometry, reflectance, illumination, pose):
-        """
-        Kết xuất ảnh từ hình học khuôn mặt, phản xạ và ánh sáng.
-        """
-        # 1. Áp dụng phép biến đổi tư thế
-        face_geometry_transformed = self.apply_pose(face_geometry, pose)
-
-        # 2. Chiếu các đỉnh từ 3D sang 2D
-        projected_2d = self.perspective_projection(face_geometry_transformed)
-
-        # 3. Tính toán màu sắc sau khi áp dụng ánh sáng
-        colors = self.apply_lighting(face_geometry_transformed, reflectance, illumination)
-
-        # 4. Tạo hình ảnh từ các đỉnh được chiếu và màu sắc
-        rendered_image = torch.zeros(face_geometry.size(0), 3, self.img_size, self.img_size)  # Tạo ảnh trống
-
-        # Lặp qua từng điểm 2D để vẽ vào ảnh
-        for i in range(face_geometry.size(1)):  # Duyệt qua từng đỉnh
-            x_2d = projected_2d[:, i, 0].long()  # Tọa độ x
-            y_2d = projected_2d[:, i, 1].long()  # Tọa độ y
-
-            # Đảm bảo tọa độ nằm trong ảnh
-            mask = (x_2d >= 0) & (x_2d < self.img_size) & (y_2d >= 0) & (y_2d < self.img_size)
-            for b in range(face_geometry.size(0)):
-                if mask[b]:
-                    rendered_image[b, :, y_2d[b], x_2d[b]] = colors[b, i, :]  # Gán màu cho pixel
-
-        return rendered_image
-
-
-class DifferentiableRenderer(nn.Module):
-    def __init__(self, image_size=256, device='cpu'):
-        super(DifferentiableRenderer, self).__init__()
-
+class DifferentiableRender(nn.Module):
+    def __init__(self, image_size=512, device="cpu"):
+        super(DifferentiableRender, self).__init__()
         self.device = device
-        self.image_size = image_size
-        self.cameras = PerspectiveCameras(device=self.device)
-        self.lights = PointLights(location=[[0.0, 0.0, -3.0]], device=self.device)
-        self.raster_settings = RasterizationSettings(
-            image_size=image_size,
-            blur_radius=0.0,
-            faces_per_pixel=1,
-        )
+        self.cameras = FoVPerspectiveCameras(device=self.device)
         self.renderer = MeshRenderer(
-            rasterizer=MeshRasterizer(cameras=self.cameras, raster_settings=self.raster_settings),
-            shader=HardPhongShader(device=self.device, cameras=self.cameras, lights=self.lights)
+            rasterizer=MeshRasterizer(
+                cameras=self.cameras,
+                raster_settings=RasterizationSettings(
+                    image_size=image_size,
+                    blur_radius=1e-6,
+                    faces_per_pixel=50,
+                )
+            ),
+            # Shader settings (will use Spherical Harmonics for illumination)
+            shader=SoftPhongShader(
+                device=self.device,
+                cameras=self.cameras
+            )
         )
 
-    def forward(self, vertices, faces, albedo):
-        textures = TexturesVertex(verts_features=albedo)
-        mesh = Meshes(verts=vertices, faces=faces, textures=textures).to(self.device)
-        rendered_image = self.renderer(mesh)
-        return rendered_image
+    def forward(self, face_geometry, reflectance, pose, illumination):
+        # face_geometry: (1, 60000, 3) tensor representing the vertices (x, y, z)
+        # reflectance: (1, 60000, 3) tensor representing the colors (R, G, B) for each vertex
+        # pose: (6) tensor representing rotation (3) and translation (3)
+        # illumination: (9) tensor representing spherical harmonics coefficients
+
+        # Extract rotation and translation from pose
+        rotation = pose[:, :3]  # roll, pitch, yaw
+        translation = pose[:, 3:]  # tx, ty, tz
+
+        # Convert rotation to rotation matrix
+        rotation_matrices = self._euler_to_rotation_matrix(rotation)
+
+        # Apply rotation and translation to vertices
+        vertices = torch.bmm(face_geometry, rotation_matrices) + translation.unsqueeze(1)
+
+        # Interpolate reflectance attributes for each face
+        """faces = self._create_faces(vertices)
+        interpolated_reflectance = self.interpolate_vertex_attributes(vertices, faces, reflectance)
+        textures = TexturesVertex(verts_features=interpolated_reflectance.view(batch_size, -1, 3))"""
+
+        # Create texture for the mesh
+        textures = TexturesVertex(verts_features=reflectance)
+
+        # Create mesh
+        mesh = Meshes(verts=vertices, faces=self._create_faces(vertices), textures=textures)
+
+        # Apply illumination using spherical harmonics
+        sh_illumination = self._apply_spherical_harmonics(vertices, reflectance, illumination)
+
+        # Render the mesh with illumination
+        images = self.renderer(mesh)
+        return images * sh_illumination
+
+    def _euler_to_rotation_matrix(self, euler_angles):
+        """
+        Convert Euler angles to rotation matrix.
+        :param euler_angles: (batch_size, 3) tensor with roll, pitch, yaw
+        :return: (batch_size, 3, 3) rotation matrices
+        """
+        batch_size = euler_angles.shape[0]
+        roll, pitch, yaw = euler_angles[:, 0], euler_angles[:, 1], euler_angles[:, 2]
+
+        cos_r, sin_r = torch.cos(roll), torch.sin(roll)
+        cos_p, sin_p = torch.cos(pitch), torch.sin(pitch)
+        cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
+
+        rotation_x = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
+        rotation_x[:, 1, 1] = cos_r
+        rotation_x[:, 1, 2] = -sin_r
+        rotation_x[:, 2, 1] = sin_r
+        rotation_x[:, 2, 2] = cos_r
+
+        rotation_y = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
+        rotation_y[:, 0, 0] = cos_p
+        rotation_y[:, 0, 2] = sin_p
+        rotation_y[:, 2, 0] = -sin_p
+        rotation_y[:, 2, 2] = cos_p
+
+        rotation_z = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
+        rotation_z[:, 0, 0] = cos_y
+        rotation_z[:, 0, 1] = -sin_y
+        rotation_z[:, 1, 0] = sin_y
+        rotation_z[:, 1, 1] = cos_y
+
+        rotation_matrix = torch.bmm(rotation_z, torch.bmm(rotation_y, rotation_x))
+        return rotation_matrix
+
+    def _create_faces(self, vertices):
+        """
+        Create faces for the mesh using Z-buffering.
+        :param vertices: (batch_size, num_vertices, 3)
+        :return: faces tensor
+        """
+        batch_size, num_vertices, _ = vertices.shape
+
+        # Assuming vertices are arranged sequentially to form triangles
+        faces = torch.arange(0, num_vertices, device=self.device).view(1, -1, 3).repeat(batch_size, 1, 1)
+
+        # Calculate the Z value for each face (mean Z value of the 3 vertices)
+        z_values = vertices[:, faces, 2].mean(dim=2)
+
+        # Sort faces based on Z value (for Z-buffering)
+        sorted_indices = torch.argsort(z_values, dim=1, descending=False)
+        sorted_faces = torch.gather(faces, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
+
+        return sorted_faces
+
+    def _apply_spherical_harmonics(self, vertices, reflectance, illumination):
+        """
+        Apply spherical harmonics illumination to the vertices.
+        :param vertices: (batch_size, num_vertices, 3) tensor of vertex positions
+        :param reflectance: (batch_size, num_vertices, 3) tensor of vertex colors
+        :param illumination: (batch_size, 9) tensor of spherical harmonics coefficients
+        :return: (batch_size, num_vertices, 3) tensor of illuminated colors
+        """
+        # Calculate normals for Lambertian reflection approximation
+        normals = F.normalize(vertices, dim=-1)
+
+        # Apply spherical harmonics to approximate lighting
+        sh_basis = self._spherical_harmonics_basis(normals)
+        lighting = torch.sum(sh_basis * illumination.unsqueeze(-1).unsqueeze(-1), dim=1)
+
+        # Multiply by reflectance for Lambertian reflection
+        illuminated_colors = reflectance * lighting.unsqueeze(-1)
+        return illuminated_colors
+
+    def _spherical_harmonics_basis(self, normals):
+        """
+        Compute the spherical harmonics basis functions for given normals.
+        :param normals: (batch_size, num_vertices, 3) tensor of vertex normals
+        :return: (batch_size, 9, num_vertices) tensor of spherical harmonics basis values
+        """
+        x, y, z = normals[..., 0], normals[..., 1], normals[..., 2]
+        sh_basis = torch.zeros(normals.shape[0], 9, normals.shape[1], device=self.device)
+        sh_basis[:, 0, :] = 0.28209479177  # Y_00
+        sh_basis[:, 1, :] = 0.4886025119 * y  # Y_1-1
+        sh_basis[:, 2, :] = 0.4886025119 * z  # Y_10
+        sh_basis[:, 3, :] = 0.4886025119 * x  # Y_11
+        sh_basis[:, 4, :] = 1.09254843059 * x * y  # Y_2-2
+        sh_basis[:, 5, :] = 1.09254843059 * y * z  # Y_2-1
+        sh_basis[:, 6, :] = 0.31539156525 * (3 * z ** 2 - 1)  # Y_20
+        sh_basis[:, 7, :] = 1.09254843059 * x * z  # Y_21
+        sh_basis[:, 8, :] = 0.54627421529 * (x ** 2 - y ** 2)  # Y_22
+        return sh_basis
+
+    def interpolate_vertex_attributes(self, vertices, faces, attributes):
+        """
+        Interpolate vertex attributes using barycentric coordinates for each face.
+        :param vertices: (batch_size, num_vertices, 3) tensor of vertex positions
+        :param faces: (batch_size, num_faces, 3) tensor of vertex indices for each face
+        :param attributes: (batch_size, num_vertices, attr_dim) tensor of vertex attributes (e.g., colors or normals)
+        :return: (batch_size, num_faces, 3, attr_dim) interpolated attributes for each face
+        """
+        batch_size, num_faces, _ = faces.shape
+        v0 = torch.gather(vertices, 1, faces[:, :, 0].unsqueeze(-1).expand(-1, -1, 3))
+        v1 = torch.gather(vertices, 1, faces[:, :, 1].unsqueeze(-1).expand(-1, -1, 3))
+        v2 = torch.gather(vertices, 1, faces[:, :, 2].unsqueeze(-1).expand(-1, -1, 3))
+
+        # Compute vectors from v0 to v1 and v0 to v2
+        v0v1 = v1 - v0
+        v0v2 = v2 - v0
+
+        # Compute the normal for each face using cross product
+        face_normals = torch.cross(v0v1, v0v2, dim=2)
+        face_normals = F.normalize(face_normals, dim=2)
+
+        # Interpolate attributes using barycentric coordinates
+        attr_v0 = torch.gather(attributes, 1, faces[:, :, 0].unsqueeze(-1).expand(-1, -1, attributes.shape[-1]))
+        attr_v1 = torch.gather(attributes, 1, faces[:, :, 1].unsqueeze(-1).expand(-1, -1, attributes.shape[-1]))
+        attr_v2 = torch.gather(attributes, 1, faces[:, :, 2].unsqueeze(-1).expand(-1, -1, attributes.shape[-1]))
+
+        # Assuming uniform barycentric weights for simplicity (1/3 for each vertex)
+        interpolated_attributes = (attr_v0 + attr_v1 + attr_v2) / 3.0
+
+        return interpolated_attributes
+
+
+if __name__ == "__main__":
+    face_geometry = torch.randn(1, 60000, 3).to(device)
+    reflectance = torch.ones(1, 60000, 3).to(device)
+    illumination = torch.randn(6, 27).to(device)
+    pose = torch.randn(6, 6).to(device)
+
+    # Khởi tạo bộ render
+    renderer = DifferentiableRender(image_size=240, device=device).to(device)
+
+    # Render ảnh 2D từ output của FullFaceModel
+    rendered_images = []
+    for i in range (illumination.shape[0]):
+        rendered_image = renderer(face_geometry, reflectance, illumination[i], pose[i])
+        rendered_images.append(rendered_image)
