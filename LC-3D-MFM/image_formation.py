@@ -27,8 +27,9 @@ class DifferentiableRender(nn.Module):
             )
         )
 
-    def forward(self, face_geometry, reflectance, pose, illumination):
+    def forward(self, face_geometry, triangle_face, reflectance, pose, illumination):
         # face_geometry: (1, 60000, 3) tensor representing the vertices (x, y, z)
+        # triangle_face: (1, ?, 3) tensor representing the vertex indices for each triangle face
         # reflectance: (1, 60000, 3) tensor representing the colors (R, G, B) for each vertex
         # pose: (6) tensor representing rotation (3) and translation (3)
         # illumination: (9) tensor representing spherical harmonics coefficients
@@ -38,6 +39,7 @@ class DifferentiableRender(nn.Module):
         translation = pose[:, 3:]  # tx, ty, tz
 
         # Convert rotation to rotation matrix
+        """Khi xoay face_geometry thì reflectance, triangle_face có thay đổi gì không?"""
         rotation_matrices = self._euler_to_rotation_matrix(rotation)
 
         # Apply rotation and translation to vertices
@@ -52,7 +54,8 @@ class DifferentiableRender(nn.Module):
         textures = TexturesVertex(verts_features=reflectance)
 
         # Create mesh
-        mesh = Meshes(verts=vertices, faces=self._create_faces(vertices), textures=textures)
+        """Cần áp dụng z-buffering để xác định visible triangle"""
+        mesh = Meshes(verts=vertices, faces=triangle_face, textures=textures)
 
         # Apply illumination using spherical harmonics
         sh_illumination = self._apply_spherical_harmonics(vertices, reflectance, illumination)
@@ -94,26 +97,6 @@ class DifferentiableRender(nn.Module):
 
         rotation_matrix = torch.bmm(rotation_z, torch.bmm(rotation_y, rotation_x))
         return rotation_matrix
-
-    def _create_faces(self, vertices):
-        """
-        Create faces for the mesh using Z-buffering.
-        :param vertices: (batch_size, num_vertices, 3)
-        :return: faces tensor
-        """
-        batch_size, num_vertices, _ = vertices.shape
-
-        # Assuming vertices are arranged sequentially to form triangles
-        faces = torch.arange(0, num_vertices, device=self.device).view(1, -1, 3).repeat(batch_size, 1, 1)
-
-        # Calculate the Z value for each face (mean Z value of the 3 vertices)
-        z_values = vertices[:, faces, 2].mean(dim=2)
-
-        # Sort faces based on Z value (for Z-buffering)
-        sorted_indices = torch.argsort(z_values, dim=1, descending=False)
-        sorted_faces = torch.gather(faces, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
-
-        return sorted_faces
 
     def _apply_spherical_harmonics(self, vertices, reflectance, illumination):
         """
@@ -187,6 +170,7 @@ class DifferentiableRender(nn.Module):
 
 if __name__ == "__main__":
     face_geometry = torch.randn(1, 60000, 3).to(device)
+    triangle_face = torch.randn(1, 20000, 3).to(device)
     reflectance = torch.ones(1, 60000, 3).to(device)
     illumination = torch.randn(6, 27).to(device)
     pose = torch.randn(6, 6).to(device)

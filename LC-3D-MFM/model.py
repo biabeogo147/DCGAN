@@ -149,6 +149,9 @@ class FullFaceModel(nn.Module):
         face_geometry, reflectance_output = self.face_model(identities,
                                                             torch.mean(torch.stack(expressions), dim=0),
                                                             reflectances)
+        """ face_geometry chỉ là tập toạ độ của các đỉnh trên khuôn mặt, 
+         để tạo dựng một khuôn mặt hoàn chỉnh, chúng ta cần đỉnh trên mặt và tam giác khuôn mặt, 
+         vì thế chúng ta cần cho các đỉnh đó đi qua mesh topology of Tewari để tạo thành bề mặt khuôn mặt liền mạch """
         return face_geometry, reflectance_output, illuminations, poses
 
 
