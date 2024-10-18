@@ -31,8 +31,8 @@ class DifferentiableRender(nn.Module):
         # face_geometry: (1, 60000, 3) tensor representing the vertices (x, y, z)
         # triangle_face: (1, ?, 3) tensor representing the vertex indices for each triangle face
         # reflectance: (1, 60000, 3) tensor representing the colors (R, G, B) for each vertex
-        # pose: (6) tensor representing rotation (3) and translation (3)
-        # illumination: (9) tensor representing spherical harmonics coefficients
+        # pose: (1, 6) tensor representing rotation (3) and translation (3)
+        # illumination: (1, 9) tensor representing spherical harmonics coefficients
 
         # Extract rotation and translation from pose
         rotation = pose[:, :3]  # roll, pitch, yaw
@@ -78,22 +78,16 @@ class DifferentiableRender(nn.Module):
         cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
 
         rotation_x = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_x[:, 1, 1] = cos_r
-        rotation_x[:, 1, 2] = -sin_r
-        rotation_x[:, 2, 1] = sin_r
-        rotation_x[:, 2, 2] = cos_r
+        rotation_x[:, 1, 1], rotation_x[:, 1, 2] = cos_r, -sin_r
+        rotation_x[:, 2, 1], rotation_x[:, 2, 2] = sin_r, cos_r
 
         rotation_y = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_y[:, 0, 0] = cos_p
-        rotation_y[:, 0, 2] = sin_p
-        rotation_y[:, 2, 0] = -sin_p
-        rotation_y[:, 2, 2] = cos_p
+        rotation_y[:, 0, 0], rotation_y[:, 0, 2] = cos_p, sin_p
+        rotation_y[:, 2, 0], rotation_y[:, 2, 2] = -sin_p, cos_p
 
         rotation_z = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_z[:, 0, 0] = cos_y
-        rotation_z[:, 0, 1] = -sin_y
-        rotation_z[:, 1, 0] = sin_y
-        rotation_z[:, 1, 1] = cos_y
+        rotation_z[:, 0, 0], rotation_z[:, 0, 1] = cos_y, -sin_y
+        rotation_z[:, 1, 0], rotation_z[:, 1, 1] = sin_y, cos_y
 
         rotation_matrix = torch.bmm(rotation_z, torch.bmm(rotation_y, rotation_x))
         return rotation_matrix
@@ -101,10 +95,10 @@ class DifferentiableRender(nn.Module):
     def _apply_spherical_harmonics(self, vertices, reflectance, illumination):
         """
         Apply spherical harmonics illumination to the vertices.
-        :param vertices: (batch_size, num_vertices, 3) tensor of vertex positions
-        :param reflectance: (batch_size, num_vertices, 3) tensor of vertex colors
-        :param illumination: (batch_size, 9) tensor of spherical harmonics coefficients
-        :return: (batch_size, num_vertices, 3) tensor of illuminated colors
+        :param vertices: (1, num_vertices, 3) tensor of vertex positions
+        :param reflectance: (1, num_vertices, 3) tensor of vertex colors
+        :param illumination: (1, 9) tensor of spherical harmonics coefficients
+        :return: (1, num_vertices, 3) tensor of illuminated colors
         """
         # Calculate normals for Lambertian reflection approximation
         normals = F.normalize(vertices, dim=-1)
@@ -181,5 +175,5 @@ if __name__ == "__main__":
     # Render ảnh 2D từ output của FullFaceModel
     rendered_images = []
     for i in range (illumination.shape[0]):
-        rendered_image = renderer(face_geometry, reflectance, illumination[i], pose[i])
+        rendered_image = renderer(face_geometry, reflectance, [illumination[i]], [pose[i]])
         rendered_images.append(rendered_image)

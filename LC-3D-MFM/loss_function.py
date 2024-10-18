@@ -1,4 +1,8 @@
+import cv2
+import dlib
 from utils import *
+import urllib.request
+import torchvision.transforms as T
 
 
 # ----- Perceptual Loss using VGG16 -----
@@ -26,7 +30,19 @@ class FullLoss(nn.Module):
                  lambda_pho=1.0, lambda_per=1.0,
                  lambda_smo=0.1, lambda_dis=0.01):
         super(FullLoss, self).__init__()
-        #  perceptual_loss (nn.Module): Hàm perceptual loss sử dụng VGG16.
+
+        shape_predictor_path = os.path.join(model_path, "shape_predictor_68_face_landmarks.dat")
+        if not os.path.exists(shape_predictor_path):
+            print("Downloading shape predictor model...")
+            url = "http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
+            urllib.request.urlretrieve(url, os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
+            import bz2
+            with (bz2.BZ2File(os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
+                  as f_in, open(shape_predictor_path, "wb") as f_out):
+                f_out.write(f_in.read())
+            os.remove(os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
+
+
         self.perceptual_loss = PerceptualLoss()
         self.lambda_land = lambda_land
         self.lambda_seg = lambda_seg
@@ -34,33 +50,20 @@ class FullLoss(nn.Module):
         self.lambda_per = lambda_per
         self.lambda_smo = lambda_smo
         self.lambda_dis = lambda_dis
+        self.face_detector = dlib.get_frontal_face_detector()
+        self.landmark_predictor = dlib.shape_predictor(shape_predictor_path)
 
-    def forward(self,
-                landmarks_pred, landmarks_true,
+    def forward(self, rendered_img, real_img,
                 lip_seg_pred, lip_seg_true,
-                rendered_img, real_img,
                 geometry_pred, smoothness_graph,
                 expression_params):
 
-        # 1. Landmark Consistency Loss (Lland)
-        Lland = F.mse_loss(landmarks_pred, landmarks_true)
-
-        # 2. Segmentation Consistency Loss (Lseg)
+        Lland = F.mse_loss(self.get_landmark(rendered_img), self.get_landmark(real_img))
         Lseg = F.mse_loss(lip_seg_pred, lip_seg_true)
-
-        # 3. Photometric Loss (Lpho)
         Lpho = F.l1_loss(rendered_img, real_img)
-
-        # 4. Perceptual Loss (Lper) using VGG16
         Lper = self.perceptual_loss(rendered_img, real_img)
-
-        # 5. Geometry Smoothness Loss (Lsmo)
         Lsmo = self.geometry_smoothness_loss(geometry_pred, smoothness_graph)
-
-        # 6. Disentanglement Loss (Ldis)
         Ldis = torch.mean(expression_params ** 2)
-
-        # Tổng hợp các hàm mất mát với trọng số
         total_loss = (self.lambda_land * Lland +
                       self.lambda_seg * Lseg +
                       self.lambda_pho * Lpho +
@@ -75,3 +78,10 @@ class FullLoss(nn.Module):
             for neighbor in smoothness_graph[g]:
                 smoothness_loss += torch.mean((geometry_pred[g] - geometry_pred[neighbor]) ** 2)
         return smoothness_loss
+
+    def get_landmark(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face = self.face_detector(gray)[0]
+        landmarks = self.landmark_predictor(gray, face)
+        landmarks_points = torch.tensor([[p.x, p.y] for p in landmarks.parts()], dtype=torch.float32)
+        return landmarks_points
