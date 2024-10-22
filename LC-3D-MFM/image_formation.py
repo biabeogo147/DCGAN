@@ -5,34 +5,13 @@ from pytorch3d.renderer import (
 )
 from pytorch3d.structures import Meshes
 
+class ProjectFunction(nn.Module):
+    def __init__(self):
+        super(ProjectFunction, self).__init__()
 
-class DifferentiableRender(nn.Module):
-    def __init__(self, image_size=512, device="cpu"):
-        super(DifferentiableRender, self).__init__()
-        self.device = device
-        self.cameras = FoVPerspectiveCameras(device=self.device)
-        self.renderer = MeshRenderer(
-            rasterizer=MeshRasterizer(
-                cameras=self.cameras,
-                raster_settings=RasterizationSettings(
-                    image_size=image_size,
-                    blur_radius=1e-6,
-                    faces_per_pixel=50,
-                )
-            ),
-            # Shader settings (will use Spherical Harmonics for illumination)
-            shader=SoftPhongShader(
-                device=self.device,
-                cameras=self.cameras
-            )
-        )
-
-    def forward(self, face_geometry, triangle_face, reflectance, pose, illumination):
-        # face_geometry: (1, 60000, 3) tensor representing the vertices (x, y, z)
-        # triangle_face: (1, ?, 3) tensor representing the vertex indices for each triangle face
-        # reflectance: (1, 60000, 3) tensor representing the colors (R, G, B) for each vertex
+    def forward(self, geometry_graph, pose):
+        # face_geometry: (1, ?, 3) tensor representing the vertices (x, y, z)
         # pose: (1, 6) tensor representing rotation (3) and translation (3)
-        # illumination: (1, 9) tensor representing spherical harmonics coefficients
 
         # Extract rotation and translation from pose
         rotation = pose[:, :3]  # roll, pitch, yaw
@@ -40,31 +19,14 @@ class DifferentiableRender(nn.Module):
 
         # Convert rotation to rotation matrix
         """Khi xoay face_geometry thì reflectance, triangle_face có thay đổi gì không?"""
-        rotation_matrices = self._euler_to_rotation_matrix(rotation)
+        rotation_matrices = self.euler_to_rotation_matrix(rotation)
 
         # Apply rotation and translation to vertices
-        vertices = torch.bmm(face_geometry, rotation_matrices) + translation.unsqueeze(1)
+        vertices = torch.bmm(geometry_graph, rotation_matrices) + translation.unsqueeze(1)
 
-        # Interpolate reflectance attributes for each face
-        """faces = self._create_faces(vertices)
-        interpolated_reflectance = self.interpolate_vertex_attributes(vertices, faces, reflectance)
-        textures = TexturesVertex(verts_features=interpolated_reflectance.view(batch_size, -1, 3))"""
+        return vertices
 
-        # Create texture for the mesh
-        textures = TexturesVertex(verts_features=reflectance)
-
-        # Create mesh
-        """Cần áp dụng z-buffering để xác định visible triangle"""
-        mesh = Meshes(verts=vertices, faces=triangle_face, textures=textures)
-
-        # Apply illumination using spherical harmonics
-        sh_illumination = self._apply_spherical_harmonics(vertices, reflectance, illumination)
-
-        # Render the mesh with illumination
-        images = self.renderer(mesh)
-        return images * sh_illumination
-
-    def _euler_to_rotation_matrix(self, euler_angles):
+    def euler_to_rotation_matrix(self, euler_angles):
         """
         Convert Euler angles to rotation matrix.
         :param euler_angles: (batch_size, 3) tensor with roll, pitch, yaw
@@ -92,7 +54,59 @@ class DifferentiableRender(nn.Module):
         rotation_matrix = torch.bmm(rotation_z, torch.bmm(rotation_y, rotation_x))
         return rotation_matrix
 
-    def _apply_spherical_harmonics(self, vertices, reflectance, illumination):
+
+
+class DifferentiableRender(nn.Module):
+    def __init__(self, image_size=512, device="cpu"):
+        super(DifferentiableRender, self).__init__()
+        self.device = device
+        self.rotate_function = ProjectFunction()
+        self.cameras = FoVPerspectiveCameras(device=self.device)
+        self.renderer = MeshRenderer(
+            rasterizer=MeshRasterizer(
+                cameras=self.cameras,
+                raster_settings=RasterizationSettings(
+                    image_size=image_size,
+                    blur_radius=1e-6,
+                    faces_per_pixel=50,
+                )
+            ),
+            # Shader settings (will use Spherical Harmonics for illumination)
+            shader=SoftPhongShader(
+                device=self.device,
+                cameras=self.cameras
+            )
+        )
+
+    def forward(self, face_geometry, triangle_face, reflectance, pose, illumination):
+        # face_geometry: (1, 60000, 3) tensor representing the vertices (x, y, z)
+        # triangle_face: (1, ?, 3) tensor representing the vertex indices for each triangle face
+        # reflectance: (1, 60000, 3) tensor representing the colors (R, G, B) for each vertex
+        # pose: (1, 6) tensor representing rotation (3) and translation (3)
+        # illumination: (1, 9) tensor representing spherical harmonics coefficients
+
+        vertices = self.rotate_function(face_geometry, pose)
+
+        # Interpolate reflectance attributes for each face
+        """faces = self._create_faces(vertices)
+        interpolated_reflectance = self.interpolate_vertex_attributes(vertices, faces, reflectance)
+        textures = TexturesVertex(verts_features=interpolated_reflectance.view(batch_size, -1, 3))"""
+
+        # Create texture for the mesh
+        textures = TexturesVertex(verts_features=reflectance)
+
+        # Create mesh
+        """Cần áp dụng z-buffering để xác định visible triangle"""
+        mesh = Meshes(verts=vertices, faces=triangle_face, textures=textures)
+
+        # Apply illumination using spherical harmonics
+        sh_illumination = self.apply_spherical_harmonics(vertices, reflectance, illumination)
+
+        # Render the mesh with illumination
+        images = self.renderer(mesh)
+        return images * sh_illumination
+
+    def apply_spherical_harmonics(self, vertices, reflectance, illumination):
         """
         Apply spherical harmonics illumination to the vertices.
         :param vertices: (1, num_vertices, 3) tensor of vertex positions
@@ -104,14 +118,14 @@ class DifferentiableRender(nn.Module):
         normals = F.normalize(vertices, dim=-1)
 
         # Apply spherical harmonics to approximate lighting
-        sh_basis = self._spherical_harmonics_basis(normals)
+        sh_basis = self.spherical_harmonics_basis(normals)
         lighting = torch.sum(sh_basis * illumination.unsqueeze(-1).unsqueeze(-1), dim=1)
 
         # Multiply by reflectance for Lambertian reflection
         illuminated_colors = reflectance * lighting.unsqueeze(-1)
         return illuminated_colors
 
-    def _spherical_harmonics_basis(self, normals):
+    def spherical_harmonics_basis(self, normals):
         """
         Compute the spherical harmonics basis functions for given normals.
         :param normals: (batch_size, num_vertices, 3) tensor of vertex normals

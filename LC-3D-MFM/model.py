@@ -117,6 +117,7 @@ class FaceModel(nn.Module):
     def forward(self, identity_params, expression_params, reflectance_params):
         identity_graph = self.identity_model_graph(identity_params)
         expression_graph = self.expression_model_graph(expression_params)
+        geometry_graph = identity_graph + expression_graph
 
         # Upsampling
         identity_geometry = torch.matmul(self.U, identity_graph.T).T
@@ -127,8 +128,9 @@ class FaceModel(nn.Module):
 
         face_geometry = face_geometry.view(identity_params.shape[0], -1, 3)
         reflectance = reflectance.view(reflectance_params.shape[0], -1, 3)
+        geometry_graph = geometry_graph.view(identity_params.shape[0], -1, 3)
 
-        return face_geometry, reflectance
+        return face_geometry, reflectance, geometry_graph
 
 
 class FullFaceModel(nn.Module):
@@ -145,14 +147,15 @@ class FullFaceModel(nn.Module):
                                     reflectance_dim=reflectance_dim)
 
     def forward(self, frames):
+        """ Normalizing images before feeding to the model """
         identities, reflectances, expressions, illuminations, poses = self.siamese_model(frames)
-        face_geometry, reflectance_output = self.face_model(identities,
+        face_geometry, reflectance_output, geometry_graph = self.face_model(identities,
                                                             torch.mean(torch.stack(expressions), dim=0),
                                                             reflectances)
         """ face_geometry chỉ là tập toạ độ của các đỉnh trên khuôn mặt, 
          để tạo dựng một khuôn mặt hoàn chỉnh, chúng ta cần đỉnh trên mặt và tam giác khuôn mặt, 
          vì thế chúng ta cần cho các đỉnh đó đi qua mesh topology of Tewari để tạo thành bề mặt khuôn mặt liền mạch """
-        return face_geometry, reflectance_output, illuminations, poses
+        return face_geometry, reflectance_output, geometry_graph, illuminations, poses
 
 
 if __name__ == "__main__":
