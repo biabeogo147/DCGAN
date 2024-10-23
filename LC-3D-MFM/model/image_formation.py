@@ -1,9 +1,12 @@
-from utils import *
 from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
     SoftPhongShader, TexturesVertex
 )
 from pytorch3d.structures import Meshes
+import torch.nn.functional as F
+from torch import nn
+import torch
+
 
 class ProjectFunction(nn.Module):
     def __init__(self):
@@ -57,7 +60,7 @@ class ProjectFunction(nn.Module):
 
 
 class DifferentiableRender(nn.Module):
-    def __init__(self, image_size=512, device="cpu"):
+    def __init__(self, image_size=240, device="cpu"):
         super(DifferentiableRender, self).__init__()
         self.device = device
         self.rotate_function = ProjectFunction()
@@ -174,20 +177,3 @@ class DifferentiableRender(nn.Module):
         interpolated_attributes = (attr_v0 + attr_v1 + attr_v2) / 3.0
 
         return interpolated_attributes
-
-
-if __name__ == "__main__":
-    face_geometry = torch.randn(1, 60000, 3).to(device)
-    triangle_face = torch.randn(1, 20000, 3).to(device)
-    reflectance = torch.ones(1, 60000, 3).to(device)
-    illumination = torch.randn(6, 27).to(device)
-    pose = torch.randn(6, 6).to(device)
-
-    # Khởi tạo bộ render
-    renderer = DifferentiableRender(image_size=240, device=device).to(device)
-
-    # Render ảnh 2D từ output của FullFaceModel
-    rendered_images = []
-    for i in range (illumination.shape[0]):
-        rendered_image = renderer(face_geometry, reflectance, [illumination[i]], [pose[i]])
-        rendered_images.append(rendered_image)

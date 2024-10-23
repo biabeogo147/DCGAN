@@ -1,7 +1,11 @@
 from utils import *
-from model import *
-from loss_function import *
-from image_formation import *
+from torch import optim
+from .. model import modules
+from .. model import loss_function
+from .. model import image_formation
+from torch.utils.data import DataLoader
+from torchvision.transforms import transforms
+
 
 if __name__ == "__main__":
     transform = transforms.Compose([
@@ -13,33 +17,11 @@ if __name__ == "__main__":
     # train_dataset = FaceDataset(train_data, transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    model = FullFaceModel()
+    model = modules.FullFaceModel()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    rotate_function = ProjectFunction()
-    land_mark_loss = LandMarkLoss()
-
-
-    # Training Loop - Stage 1: Pose Pretraining
-    for epoch in range(num_epochs // 3):
-        model.train()
-        running_loss = 0.0
-
-        for frames in train_loader:
-            _, _, geometry_graph, _, poses = model(frames)
-
-            output = rotate_function(geometry_graph, poses)
-            loss = land_mark_loss(output, geometry_graph)
-
-            # Backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        # Print epoch loss
-        print(f"Pose Pretraining Epoch [{epoch + 1}/{num_epochs // 3}], Loss: {running_loss / len(train_loader):.4f}")
+    rotate_function = image_formation.ProjectFunction()
+    land_mark_loss = loss_function.LandMarkLoss()
 
     # Training Loop - Stage 2: Identity Pretraining
     for epoch in range(num_epochs // 3):

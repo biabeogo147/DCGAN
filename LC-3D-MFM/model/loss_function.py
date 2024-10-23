@@ -1,7 +1,9 @@
 import cv2
-import dlib
-from utils import *
-import urllib.request
+import torch
+import numpy as np
+from torch import nn
+from torchvision import models
+import torch.nn.functional as F
 import torchvision.models.segmentation as segmentation
 
 
@@ -57,6 +59,28 @@ class SegmentationLoss(nn.Module):
         return loss / total_points if total_points > 0 else 0
 
 
+class PhotometricLoss(nn.Module):
+    def __init__(self):
+        super(PhotometricLoss, self).__init__()
+
+    def forward(self, rendered_img, real_img):
+        photometric_loss = 0
+        for i in range(len(real_img)):
+            Fi = real_img[i]
+            Si = rendered_img[i]
+            Mi = self.create_mask(Fi, Si)
+            diff = Mi * (Fi - Si)
+            photometric_loss += torch.sum(diff ** 2)
+
+        return photometric_loss
+
+    def create_mask(self, rendered_img, real_img, threshold=0.1):
+        diff = torch.abs(real_img - rendered_img)
+        diff_mean = torch.mean(diff, dim=-1, keepdim=True)
+        mask = (diff_mean < threshold).float()
+        return mask
+
+
 class PerceptualLoss(nn.Module):
     def __init__(self):
         super(PerceptualLoss, self).__init__()
@@ -79,23 +103,37 @@ class PerceptualLoss(nn.Module):
         return perceptual_loss
 
 
+class GeometrySmoothnessLoss(nn.Module):
+    def __init__(self):
+        super(GeometrySmoothnessLoss, self).__init__()
+
+    def forward(self, geometry_graph):
+        smoothness_loss = 0.0
+        batch_size, Ng, _ = geometry_graph.shape
+
+        for i in range(1, Ng):
+            node_position = geometry_graph[:, i, :]
+            """ Where to get neighbor nodes? From topology of origin mesh?  """
+            prev_node_position = geometry_graph[:, i - 1, :]
+            smoothness_loss += F.mse_loss(node_position, prev_node_position)
+
+        return smoothness_loss
+
+
+class DisentanglementLoss(nn.Module):
+    def __init__(self):
+        super(DisentanglementLoss, self).__init__()
+
+    def forward(self, expression_params):
+        return torch.sum(expression_params ** 2)
+
+
 class FullLoss(nn.Module):
     def __init__(self,
-                 lambda_land=1.0, lambda_seg=1.0,
-                 lambda_pho=1.0, lambda_per=1.0,
-                 lambda_smo=0.1, lambda_dis=0.01):
+                 lambda_land=50.0, lambda_seg=0.001,
+                 lambda_pho=2.5, lambda_per=1.0,
+                 lambda_smo=10.0, lambda_dis=1.0):
         super(FullLoss, self).__init__()
-
-        shape_predictor_path = os.path.join(model_path, "shape_predictor_68_face_landmarks.dat")
-        if not os.path.exists(shape_predictor_path):
-            print("Downloading shape predictor model...")
-            url = "http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
-            urllib.request.urlretrieve(url, os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
-            import bz2
-            with (bz2.BZ2File(os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
-                  as f_in, open(shape_predictor_path, "wb") as f_out):
-                f_out.write(f_in.read())
-            os.remove(os.path.join(model_path, "shape_predictor_68_face_landmarks.dat.bz2"))
 
         self.lambda_land = lambda_land
         self.lambda_seg = lambda_seg
@@ -106,7 +144,10 @@ class FullLoss(nn.Module):
 
         self.landmark_loss = LandMarkLoss()
         self.segmentation_loss = SegmentationLoss()
+        self.photometric_consistency_loss = PhotometricLoss()
         self.perceptual_loss = PerceptualLoss()
+        self.geometry_smoothness_loss = GeometrySmoothnessLoss()
+        self.disentanglement_loss = DisentanglementLoss()
 
     def forward(self, rendered_img, real_img,
                 geometry_pred, geometry_graph,
@@ -125,35 +166,3 @@ class FullLoss(nn.Module):
                       self.lambda_smo * Lsmo +
                       self.lambda_dis * Ldis)
         return total_loss
-
-    def photometric_consistency_loss(self, rendered_img, real_img):
-        def create_mask(rendered_img, real_img, threshold=0.1):
-            diff = torch.abs(real_img - rendered_img)
-            diff_mean = torch.mean(diff, dim=-1, keepdim=True)
-            mask = (diff_mean < threshold).float()
-            return mask
-
-        photometric_loss = 0
-        for i in range(len(real_img)):
-            Fi = real_img[i]
-            Si = rendered_img[i]
-            Mi = create_mask(Fi, Si)
-            diff = Mi * (Fi - Si)
-            photometric_loss += torch.sum(diff ** 2)
-
-        return photometric_loss
-
-    def geometry_smoothness_loss(self, geometry_graph):
-        smoothness_loss = 0.0
-        batch_size, Ng, _ = geometry_graph.shape
-
-        for i in range(1, Ng):
-            node_position = geometry_graph[:, i, :]
-            """ Where to get neighbor nodes? From topology of origin mesh?  """
-            prev_node_position = geometry_graph[:, i - 1, :]
-            smoothness_loss += F.mse_loss(node_position, prev_node_position)
-
-        return smoothness_loss
-
-    def disentanglement_loss(self, expression_params):
-        return torch.sum(expression_params ** 2)

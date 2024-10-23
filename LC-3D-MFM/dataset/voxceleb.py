@@ -1,4 +1,10 @@
-from utils import *
+import os
+import torch
+import numpy as np
+from PIL import Image
+import torch.utils.data
+import torch.nn.parallel
+from torch.utils.data import Dataset
 
 
 class VOXCeleb3dDataset(Dataset):
