@@ -58,7 +58,6 @@ class ProjectFunction(nn.Module):
         return rotation_matrix
 
 
-
 class DifferentiableRender(nn.Module):
     def __init__(self, image_size=240, device="cpu"):
         super(DifferentiableRender, self).__init__()
