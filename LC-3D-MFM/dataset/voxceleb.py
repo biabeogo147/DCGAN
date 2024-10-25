@@ -6,9 +6,10 @@ from PIL import Image
 
 
 class VOXCeleb3dDataset(Dataset):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, transform=None):
         self.samples = []
         self.root_dir = root_dir
+        self.transform = transform
         for folder_name in os.listdir(root_dir):
             folder_path = os.path.join(root_dir, folder_name)
             if os.path.isdir(folder_path):
@@ -33,9 +34,10 @@ class VOXCeleb3dDataset(Dataset):
 
         image_path = os.path.join(folder_path, f"{base_name}.jpg")
         image = Image.open(image_path).convert('RGB')
+        image = self.transform(image) if self.transform else image
 
         return {
             'npy_data': npy_data,
             'xyz_data': xyz_data,
-            'image': image
+            'image': image,
         }

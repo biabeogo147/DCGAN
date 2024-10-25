@@ -1,7 +1,7 @@
 from utils import *
 from torch import optim
 from .. model import modules
-from dataset import PoseDataset
+from .. dataset import voxceleb
 from .. model import loss_function
 from .. model import image_formation
 from torch.utils.data import DataLoader
@@ -17,7 +17,7 @@ def pose_pretrain():
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
-    train_dataset = PoseDataset(transform=transform)
+    train_dataset = voxceleb.VOXCeleb3dDataset(root_dir="D:/DS-AI/data/voxceleb3d/Voxceleb3D_F-Z", transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -45,6 +45,7 @@ def pose_pretrain():
 
     torch.save(model.state_dict(), 'pose_pretrained_model.pth')
     print("Pose pretraining completed and model saved.")
+
 
 if __name__ == "__main__":
     pose_pretrain()
