@@ -155,14 +155,14 @@ class FullLoss(nn.Module):
         """ Normalize rendered_img before passing to FullLoss """
         Lland = self.landmark_loss(geometry_pred, geometry_graph)
         Lseg = self.segmentation_loss(rendered_img, real_img)
-        Lpho = self.photometric_consistency_loss(rendered_img, real_img)
-        Lper = self.perceptual_loss(rendered_img, real_img)
+        # Lpho = self.photometric_consistency_loss(rendered_img, real_img)
+        # Lper = self.perceptual_loss(rendered_img, real_img)
         Lsmo = self.geometry_smoothness_loss(geometry_pred)
         Ldis = self.disentanglement_loss(expression_params)
         total_loss = (self.lambda_land * Lland +
                       self.lambda_seg * Lseg +
-                      self.lambda_pho * Lpho +
-                      self.lambda_per * Lper +
+                      # self.lambda_pho * Lpho +
+                      # self.lambda_per * Lper +
                       self.lambda_smo * Lsmo +
                       self.lambda_dis * Ldis)
         return total_loss
