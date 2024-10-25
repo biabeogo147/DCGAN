@@ -1,56 +1,41 @@
 import os
-import torch
 import numpy as np
-from PIL import Image
-import torch.utils.data
-import torch.nn.parallel
+import torch
 from torch.utils.data import Dataset
+from PIL import Image
 
 
 class VOXCeleb3dDataset(Dataset):
-    def __init__(self, dataset_dir, transform=None):
-        super().__init__()
-        self.ext_dict = {
-            '.npy': 'npy',
-            '.xyz': 'xyz',
-            '.jpg_b': 'b_image',
-            '.jpg_s': 's_image'
-        }
-        self.transform = transform
-        self.dataset_dir = dataset_dir
-        self.data_list = self._load_dataset()
-
-    def _load_dataset(self):
-        dataset = []
-
-        for folder in os.listdir(self.dataset_dir):
-            sample = dict()
-            for file_name in os.listdir(folder):
-                base_name, ext = os.path.splitext(file_name)
-                sample_id = base_name.split('_')[0]
-                sample['sample_id'] = sample_id
-
-                key = self.ext_dict.get(ext if ext != '.jpg' else f'{ext}_{base_name[-1]}')
-                sample[key] = os.path.join(self.dataset_dir, folder, file_name)
-        return dataset
+    def __init__(self, root_dir):
+        self.samples = []
+        self.root_dir = root_dir
+        for folder_name in os.listdir(root_dir):
+            folder_path = os.path.join(root_dir, folder_name)
+            if os.path.isdir(folder_path):
+                for file_name in os.listdir(folder_path):
+                    if file_name.endswith(".npy"):
+                        file_path = os.path.join(folder_path, file_name)
+                        self.samples.append(file_path)
 
     def __len__(self):
-        return len(self.data_list)
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        sample = self.data_list[idx]
-        npy_data = np.load(sample[self.ext_dict['.npy']])
-        xyz_data = np.loadtxt(sample[self.ext_dict['.xyz']])
-        b_image = Image.open(sample[self.ext_dict['.jpg_b']]).convert('RGB')
-        s_image = Image.open(sample[self.ext_dict['.jpg_s']]).convert('RGB')
+        file_path = self.samples[idx]
+        folder_path = os.path.dirname(file_path)
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
 
-        if self.transform:
-            b_image = self.transform(b_image)
-            s_image = self.transform(s_image)
+        npy_data = np.load(file_path)
+
+        xyz_path = os.path.join(folder_path, f"{base_name}.xyz")
+        with open(xyz_path, 'r') as xyz_file:
+            xyz_data = xyz_file.readlines()
+
+        image_path = os.path.join(folder_path, f"{base_name}.jpg")
+        image = Image.open(image_path).convert('RGB')
 
         return {
-            'npy_data': torch.tensor(npy_data, dtype=torch.float32),
-            'xyz_data': torch.tensor(xyz_data, dtype=torch.float32),
-            'b_image': b_image,
-            's_image': s_image
+            'npy_data': npy_data,
+            'xyz_data': xyz_data,
+            'image': image
         }
