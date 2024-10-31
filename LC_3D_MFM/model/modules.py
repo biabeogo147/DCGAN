@@ -97,8 +97,17 @@ class SiameseModel(nn.Module):
 
 
 class FaceModel(nn.Module):
-    def __init__(self, num_vertices=60000, num_graph_nodes=512, identity_dim=80, expression_dim=64, reflectance_dim=80):
+    def __init__(self, mean_face_path,
+                 num_graph_nodes=512, identity_dim=80,
+                 expression_dim=64, reflectance_dim=80):
         super(FaceModel, self).__init__()
+
+        self.mean_face_path = mean_face_path
+        self.mean_face, self.triangle_face = self.set_mean_face()
+        num_vertices = len(self.mean_face)
+
+        """ Find mean_face_reflectance """
+        self.mean_face_reflectance = torch.zeros(1, num_vertices * 3)
 
         self.identity_model_graph = nn.Linear(identity_dim, num_graph_nodes * 3)
         self.expression_model_graph = nn.Linear(expression_dim, num_graph_nodes * 3)
@@ -108,38 +117,46 @@ class FaceModel(nn.Module):
         """ We should precompute this before training """
         self.U = torch.randn(num_vertices * 3, num_graph_nodes * 3)
 
-        """ We should use mean_face value from [4] in paper """
-        self.mean_face = torch.zeros(1, num_vertices * 3)
-        self.mean_face_reflectance = torch.zeros(1, num_vertices * 3)
+
+    def set_mean_face(self):
+        mean_face = []
+        triangle_face = []
+        with open(self.mean_face_path, 'r') as file:
+            for line in file:
+                if line.startswith('v '):
+                    mean_face.append(list(map(float, line.strip().split()[1:])))
+                elif line.startswith('f '):
+                    triangle_face.append(list(map(int, line.strip().split()[1:])))
+
+        return torch.tensor(mean_face), torch.tensor(triangle_face)
+
 
     def forward(self, identity_params, expression_params, reflectance_params):
         identity_graph = self.identity_model_graph(identity_params)
         expression_graph = self.expression_model_graph(expression_params)
-        geometry_graph = identity_graph + expression_graph
+        geometry_graph = (identity_graph + expression_graph).view(identity_params.shape[0], -1, 3)
 
         # Upsampling
-        identity_geometry = torch.matmul(self.U, identity_graph.T).T
-        expression_geometry = torch.matmul(self.U, expression_graph.T).T
-
+        identity_geometry = torch.matmul(self.U, identity_graph.T).T.view(identity_params.shape[0], -1, 3)
+        expression_geometry = torch.matmul(self.U, expression_graph.T).T.view(expression_params.shape[0], -1, 3)
         face_geometry = self.mean_face + identity_geometry + expression_geometry
-        reflectance = self.mean_face_reflectance + self.reflectance_model(reflectance_params)
 
-        face_geometry = face_geometry.view(identity_params.shape[0], -1, 3)
-        reflectance = reflectance.view(reflectance_params.shape[0], -1, 3)
-        geometry_graph = geometry_graph.view(identity_params.shape[0], -1, 3)
+        reflectance = (self.mean_face_reflectance
+                       + self.reflectance_model(reflectance_params).view(reflectance_params.shape[0], -1, 3))
 
         return face_geometry, reflectance, geometry_graph
 
 
 class FullFaceModel(nn.Module):
-    def __init__(self, num_vertices=60000, num_graph_nodes=512,
-                 identity_dim=80, expression_dim=64, reflectance_dim=80):
+    def __init__(self, mean_face_path,
+                 num_graph_nodes=512, identity_dim=80,
+                 expression_dim=64, reflectance_dim=80):
         super(FullFaceModel, self).__init__()
 
         self.siamese_model = SiameseModel()
-        self.face_model = FaceModel(num_vertices=num_vertices, num_graph_nodes=num_graph_nodes,
-                                    identity_dim=identity_dim, expression_dim=expression_dim,
-                                    reflectance_dim=reflectance_dim)
+        self.face_model = FaceModel(mean_face_path=mean_face_path,
+                                    num_graph_nodes=num_graph_nodes, identity_dim=identity_dim,
+                                    expression_dim=expression_dim, reflectance_dim=reflectance_dim)
 
     def forward(self, frames):
         """ Normalizing images before feeding to the model """
@@ -147,7 +164,4 @@ class FullFaceModel(nn.Module):
         face_geometry, reflectance_output, geometry_graph = self.face_model(identity.unsqueeze(0),
                                                             torch.mean(torch.stack(expressions), dim=0),
                                                             reflectance.unsqueeze(0))
-        """ face_geometry chỉ là tập toạ độ của các đỉnh trên khuôn mặt, 
-         để tạo dựng một khuôn mặt hoàn chỉnh, chúng ta cần đỉnh trên mặt và tam giác khuôn mặt, 
-         vì thế chúng ta cần cho các đỉnh đó đi qua mesh topology of Tewari để tạo thành bề mặt khuôn mặt liền mạch """
         return face_geometry, reflectance_output, poses, geometry_graph, illuminations

@@ -1,7 +1,7 @@
 from utils import *
 from torch import optim
 from .. model import modules
-from .. dataset import voxceleb
+from .. dataset_mfm import voxceleb
 from .. model import loss_function
 from .. model import image_formation
 from torch.utils.data import DataLoader

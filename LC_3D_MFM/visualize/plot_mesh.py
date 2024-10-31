@@ -1,44 +1,23 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
-
-def parse_obj_vertices(file_path):
-    vertices = []
-    with open(file_path, 'r') as file:
-        for line in file:
-            if line.startswith('v '):
-                parts = line.split()
-                x, y, z = map(float, parts[1:4])
-                vertices.append([x, y, z])
-    return np.array(vertices)
-
-
-def parse_obj_faces(file_path):
-    faces = []
-    with open(file_path, 'r') as file:
-        for line in file:
-            if line.startswith('f '):
-                parts = line.split()[1:]
-                if len(parts) == 3:  # Checking if it's a triangular face
-                    faces.append(parts)
-    return faces
+from LC_3D_MFM.dataset_mfm.mesh_analysis import count_vertices_and_faces
 
 
 def get_face_vertices(vertices, faces):
-    face_vertices = []
-    for face in faces:
-        indices = [int(idx.split('/')[0]) - 1 for idx in face]  # Extracting vertex indices (OBJ is 1-based index)
-        face_vertices.append([vertices[i] for i in indices])
+    face_vertices = [[vertices[i - 1] for i in face] for face in faces]
     return face_vertices
 
 
 if __name__ == '__main__':
-    file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    # file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    file_path = "../../data/male.obj"
 
-    all_vertices = parse_obj_vertices(file_path)
-    all_faces = parse_obj_faces(file_path)
+    all_vertices, all_faces, _, _ = count_vertices_and_faces(file_path)
     all_face_vertices = get_face_vertices(all_vertices, all_faces)
+
+    all_vertices = np.array(all_vertices)
+    all_faces = np.array(all_faces)
 
     max_range = np.array([all_vertices[:, 0].max() - all_vertices[:, 0].min(),
                           all_vertices[:, 1].max() - all_vertices[:, 1].min(),
