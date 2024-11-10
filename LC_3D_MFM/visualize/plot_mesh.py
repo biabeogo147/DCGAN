@@ -5,7 +5,7 @@ from LC_3D_MFM.dataset_mfm.mesh_analysis import count_vertices_and_faces
 
 
 def get_face_vertices(vertices, faces):
-    face_vertices = [[vertices[i - 1] for i in face] for face in faces]
+    face_vertices = [[vertices[i] for i in face] for face in faces]
     return face_vertices
 
 

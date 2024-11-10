@@ -2,7 +2,7 @@ import os
 
 
 def count_vertices_and_faces(file_path):
-    vertex, face = [], []
+    vertex, face = [[0, 0, 0]], []
     vertex_count, face_count = 0, 0
     if os.path.exists(file_path):
         with open(file_path, 'r') as file:

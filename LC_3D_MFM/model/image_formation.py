@@ -1,7 +1,9 @@
 from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
-    SoftPhongShader, TexturesVertex
+    SoftPhongShader, TexturesVertex, PerspectiveCameras
 )
+from pytorch3d.transforms import Rotate, Translate
+from scipy.spatial.transform import Rotation as R
 from pytorch3d.structures import Meshes
 import torch.nn.functional as F
 from torch import nn
@@ -9,53 +11,55 @@ import torch
 
 
 class ProjectFunction(nn.Module):
-    def __init__(self):
+    def __init__(self, focal_length=800.0, image_size=240, device=None):
         super(ProjectFunction, self).__init__()
+        self.image_size = image_size
+        self.focal_length = focal_length
+        self.device = device if device else torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.cameras = PerspectiveCameras(
+            focal_length=((focal_length, focal_length),),
+            principal_point=((image_size / 2, image_size / 2),),
+            image_size=((image_size, image_size),),
+            in_ndc=False,
+            device=self.device
+        )
+        self.rasterizer = MeshRasterizer(
+            cameras=self.cameras,
+            raster_settings=RasterizationSettings(
+                image_size=image_size,
+                blur_radius=0.0,
+                faces_per_pixel=1,
+            )
+        )
+        self.renderer = MeshRenderer(
+            rasterizer=self.rasterizer,
+            shader=SoftPhongShader(device=self.device, cameras=self.cameras)
+        )
 
-    def forward(self, geometry_graph, pose):
-        # face_geometry: (1, ?, 3) tensor representing the vertices (x, y, z)
-        # pose: (1, 6) tensor representing rotation (3) and translation (3)
 
-        # Extract rotation and translation from pose
-        rotation = pose[:, :3]  # roll, pitch, yaw
-        translation = pose[:, 3:]  # tx, ty, tz
+    def rotation_matrix(self, pose):
+        rotation = torch.tensor(R.from_rotvec(pose).as_matrix())
+        return rotation
 
-        # Convert rotation to rotation matrix
-        """Khi xoay face_geometry thì reflectance, triangle_face có thay đổi gì không?"""
-        rotation_matrices = self.euler_to_rotation_matrix(rotation)
 
-        # Apply rotation and translation to vertices
-        vertices = torch.bmm(geometry_graph, rotation_matrices) + translation.unsqueeze(1)
+    def forward(self, face_geometry, triangle_face, pose):
+        if not isinstance(face_geometry, torch.Tensor):
+            face_geometry = torch.tensor(face_geometry, dtype=torch.float32, device=self.device)
+        if not isinstance(triangle_face, torch.Tensor):
+            triangle_face = torch.tensor(triangle_face, dtype=torch.int64, device=self.device)
+        if not isinstance(pose, torch.Tensor):
+            pose = torch.tensor(pose, dtype=torch.float32, device=self.device)
 
-        return vertices
+        rotation = Rotate(R=self.rotation_matrix(pose[:3]), device=self.device)
+        translation = Translate(x=pose[3], y=pose[4], z=pose[5], device=self.device)
 
-    def euler_to_rotation_matrix(self, euler_angles):
-        """
-        Convert Euler angles to rotation matrix.
-        :param euler_angles: (batch_size, 3) tensor with roll, pitch, yaw
-        :return: (batch_size, 3, 3) rotation matrices
-        """
-        batch_size = euler_angles.shape[0]
-        roll, pitch, yaw = euler_angles[:, 0], euler_angles[:, 1], euler_angles[:, 2]
+        face_geometry_transformed = translation.transform_points(rotation.transform_points(face_geometry))
+        verts_features = torch.ones_like(face_geometry_transformed)[None]
+        textures = TexturesVertex(verts_features=verts_features)
 
-        cos_r, sin_r = torch.cos(roll), torch.sin(roll)
-        cos_p, sin_p = torch.cos(pitch), torch.sin(pitch)
-        cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
-
-        rotation_x = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_x[:, 1, 1], rotation_x[:, 1, 2] = cos_r, -sin_r
-        rotation_x[:, 2, 1], rotation_x[:, 2, 2] = sin_r, cos_r
-
-        rotation_y = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_y[:, 0, 0], rotation_y[:, 0, 2] = cos_p, sin_p
-        rotation_y[:, 2, 0], rotation_y[:, 2, 2] = -sin_p, cos_p
-
-        rotation_z = torch.eye(3, device=self.device).repeat(batch_size, 1, 1)
-        rotation_z[:, 0, 0], rotation_z[:, 0, 1] = cos_y, -sin_y
-        rotation_z[:, 1, 0], rotation_z[:, 1, 1] = sin_y, cos_y
-
-        rotation_matrix = torch.bmm(rotation_z, torch.bmm(rotation_y, rotation_x))
-        return rotation_matrix
+        mesh = Meshes(verts=[face_geometry_transformed], faces=[triangle_face], textures=textures)
+        images = self.renderer(mesh)
+        return images[0, ..., :3]
 
 
 class DifferentiableRender(nn.Module):
