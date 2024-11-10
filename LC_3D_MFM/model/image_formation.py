@@ -2,7 +2,7 @@ from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
     SoftPhongShader, TexturesVertex, PerspectiveCameras
 )
-from pytorch3d.transforms import Rotate, Translate
+from pytorch3d.transforms import Rotate, Translate, Transform3d
 from scipy.spatial.transform import Rotation as R
 from pytorch3d.structures import Meshes
 import torch.nn.functional as F
@@ -52,8 +52,9 @@ class ProjectFunction(nn.Module):
 
         rotation = Rotate(R=self.rotation_matrix(pose[:3]), device=self.device)
         translation = Translate(x=pose[3], y=pose[4], z=pose[5], device=self.device)
+        rt = Transform3d.compose(rotation, translation)
 
-        face_geometry_transformed = translation.transform_points(rotation.transform_points(face_geometry))
+        face_geometry_transformed = rt.transform_points(face_geometry)
         verts_features = torch.ones_like(face_geometry_transformed)[None]
         textures = TexturesVertex(verts_features=verts_features)
 
