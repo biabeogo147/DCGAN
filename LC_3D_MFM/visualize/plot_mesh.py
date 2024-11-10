@@ -10,8 +10,8 @@ def get_face_vertices(vertices, faces):
 
 
 if __name__ == '__main__':
-    # file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
-    file_path = "../../data/male.obj"
+    file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    # file_path = "../../data/male.obj"
 
     all_vertices, all_faces, _, _ = count_vertices_and_faces(file_path)
     all_face_vertices = get_face_vertices(all_vertices, all_faces)

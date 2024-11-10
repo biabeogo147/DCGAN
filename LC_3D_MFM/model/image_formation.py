@@ -1,6 +1,6 @@
 from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
-    SoftPhongShader, TexturesVertex, PerspectiveCameras
+    SoftPhongShader, TexturesVertex, PerspectiveCameras, look_at_view_transform
 )
 from pytorch3d.transforms import Rotate, Translate, Transform3d
 from scipy.spatial.transform import Rotation as R
@@ -11,11 +11,11 @@ import torch
 
 
 class ProjectFunction(nn.Module):
-    def __init__(self, focal_length=800.0, image_size=240, device=None):
+    def __init__(self, focal_length=800.0, image_size=240, device="cpu"):
         super(ProjectFunction, self).__init__()
         self.image_size = image_size
         self.focal_length = focal_length
-        self.device = device if device else torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.cameras = PerspectiveCameras(
             focal_length=((focal_length, focal_length),),
             principal_point=((image_size / 2, image_size / 2),),
@@ -36,11 +36,9 @@ class ProjectFunction(nn.Module):
             shader=SoftPhongShader(device=self.device, cameras=self.cameras)
         )
 
-
     def rotation_matrix(self, pose):
         rotation = torch.tensor(R.from_rotvec(pose).as_matrix())
         return rotation
-
 
     def forward(self, face_geometry, triangle_face, pose):
         if not isinstance(face_geometry, torch.Tensor):
@@ -50,16 +48,11 @@ class ProjectFunction(nn.Module):
         if not isinstance(pose, torch.Tensor):
             pose = torch.tensor(pose, dtype=torch.float32, device=self.device)
 
-        rotation = Rotate(R=self.rotation_matrix(pose[:3]), device=self.device)
-        translation = Translate(x=pose[3], y=pose[4], z=pose[5], device=self.device)
-        rt = Transform3d.compose(rotation, translation)
-
-        face_geometry_transformed = rt.transform_points(face_geometry)
-        verts_features = torch.ones_like(face_geometry_transformed)[None]
+        verts_features = torch.ones_like(face_geometry)[None]
         textures = TexturesVertex(verts_features=verts_features)
 
-        mesh = Meshes(verts=[face_geometry_transformed], faces=[triangle_face], textures=textures)
-        images = self.renderer(mesh)
+        mesh = Meshes(verts=[face_geometry], faces=[triangle_face], textures=textures)
+        images = self.renderer(mesh, R=self.rotation_matrix(pose[:3]).unsqueeze(0), T=pose[3:].unsqueeze(0))
         return images[0, ..., :3]
 
 
