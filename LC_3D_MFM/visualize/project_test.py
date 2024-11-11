@@ -31,7 +31,6 @@ if __name__ == '__main__':
     file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
     # file_path = "../../data/male.obj"
 
-    # all_vertices, all_faces, _, _ = count_vertices_and_faces(file_path)
     all_vertices, all_faces, _ = load_obj(file_path)
     all_faces = all_faces.verts_idx
 
@@ -39,11 +38,9 @@ if __name__ == '__main__':
     project_function = image_formation.ProjectFunction(focal_length=200.0, image_size=240, device="cpu")
     image = project_function(all_vertices, all_faces, pose)
     print(image.shape)
-    print(image)
     plt.imshow(image.cpu().numpy())
     plt.axis("off")
     plt.show()
 
-    # all_faces = all_faces.verts_idx
     # test_mesh = Meshes(verts=[all_vertices], faces=[all_faces])
     # plot_pointcloud(test_mesh, title="Original Mesh")

@@ -16,13 +16,7 @@ class ProjectFunction(nn.Module):
         self.image_size = image_size
         self.focal_length = focal_length
         self.device = device
-        self.cameras = PerspectiveCameras(
-            focal_length=((focal_length, focal_length),),
-            principal_point=((image_size / 2, image_size / 2),),
-            image_size=((image_size, image_size),),
-            in_ndc=False,
-            device=self.device
-        )
+        self.cameras = FoVPerspectiveCameras(device=self.device)
         self.rasterizer = MeshRasterizer(
             cameras=self.cameras,
             raster_settings=RasterizationSettings(
