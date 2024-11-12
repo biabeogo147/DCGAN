@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from LC_3D_MFM.dataset_mfm.mesh_analysis import count_vertices_and_faces
+from LC_3D_MFM.dataset_mfm.obj_analysis import count_vertices_and_faces
 
 
 def get_face_vertices(vertices, faces):
@@ -11,6 +11,7 @@ def get_face_vertices(vertices, faces):
 
 if __name__ == '__main__':
     file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    # file_path = "D:/DS-AI/data/bfm2019_face_color.obj"
     # file_path = "../../data/male.obj"
 
     all_vertices, all_faces, _, _ = count_vertices_and_faces(file_path)
@@ -29,7 +30,6 @@ if __name__ == '__main__':
 
     fig = plt.figure(figsize=(18, 12))
 
-    # Different viewing angles
     angles = [(20, 30), (45, 45), (70, 60), (90, 90)]
 
     for i, (elev, azim) in enumerate(angles):

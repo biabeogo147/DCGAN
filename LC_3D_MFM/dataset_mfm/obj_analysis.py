@@ -22,7 +22,8 @@ def count_vertices_and_faces(file_path):
 
 if __name__ == "__main__":
     file_paths = [
-        "../../data/male.obj"
+        # "../../data/male.obj"
+        "D:/DS-AI/data/bfm2019_face_color.obj",
         # "D:/DS-AI/data/voxceleb3d/all.obj",
         # "D:/DS-AI/data/voxceleb3d/all_female.obj",
         # "D:/DS-AI/data/voxceleb3d/all_male.obj"

@@ -4,7 +4,7 @@ from pytorch3d.io import load_obj
 from pytorch3d.structures import Meshes
 from LC_3D_MFM.model import image_formation
 from pytorch3d.ops import sample_points_from_meshes
-from LC_3D_MFM.dataset_mfm.mesh_analysis import count_vertices_and_faces
+from LC_3D_MFM.dataset_mfm.obj_analysis import count_vertices_and_faces
 
 
 def get_face_vertices(vertices, faces):
@@ -28,7 +28,8 @@ def plot_pointcloud(mesh, title=""):
 
 
 if __name__ == '__main__':
-    file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    # file_path = "D:/DS-AI/data/voxceleb3d/all.obj"
+    file_path = "D:/DS-AI/data/bfm2019_face_color.obj"
     # file_path = "../../data/male.obj"
 
     all_vertices, all_faces, _ = load_obj(file_path)
