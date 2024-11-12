@@ -1,8 +1,8 @@
+import h5py
 from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
-    SoftPhongShader, TexturesVertex, PerspectiveCameras, look_at_view_transform
+    SoftPhongShader, TexturesVertex, PointLights
 )
-from pytorch3d.transforms import Rotate, Translate, Transform3d
 from scipy.spatial.transform import Rotation as R
 from pytorch3d.structures import Meshes
 import torch.nn.functional as F
@@ -13,39 +13,45 @@ import torch
 class ProjectFunction(nn.Module):
     def __init__(self, focal_length=800.0, image_size=240, device="cpu"):
         super(ProjectFunction, self).__init__()
+        self.device = device
         self.image_size = image_size
         self.focal_length = focal_length
-        self.device = device
         self.cameras = FoVPerspectiveCameras(device=self.device)
-        self.rasterizer = MeshRasterizer(
-            cameras=self.cameras,
-            raster_settings=RasterizationSettings(
-                image_size=image_size,
-                blur_radius=0.0,
-                faces_per_pixel=1,
-            )
-        )
         self.renderer = MeshRenderer(
-            rasterizer=self.rasterizer,
-            shader=SoftPhongShader(device=self.device, cameras=self.cameras)
+            rasterizer=MeshRasterizer(
+                cameras=self.cameras,
+                raster_settings=RasterizationSettings(
+                    image_size=image_size,
+                    blur_radius=0.0,
+                    faces_per_pixel=1,
+                )
+            ),
+            shader=SoftPhongShader(
+                device=self.device,
+                cameras=self.cameras,
+                lights=PointLights(device=self.device, location=[[0.0, 0.0, -3.0]]),
+            )
         )
 
     def rotation_matrix(self, pose):
         rotation = torch.tensor(R.from_rotvec(pose).as_matrix())
         return rotation
 
-    def forward(self, face_geometry, triangle_face, pose):
+    def forward(self, face_geometry, triangle_face, colors, pose):
         if not isinstance(face_geometry, torch.Tensor):
             face_geometry = torch.tensor(face_geometry, dtype=torch.float32, device=self.device)
         if not isinstance(triangle_face, torch.Tensor):
             triangle_face = torch.tensor(triangle_face, dtype=torch.int64, device=self.device)
         if not isinstance(pose, torch.Tensor):
             pose = torch.tensor(pose, dtype=torch.float32, device=self.device)
-
-        verts_features = torch.ones_like(face_geometry)[None]
-        textures = TexturesVertex(verts_features=verts_features)
+        textures = TexturesVertex(verts_features=[colors])
 
         mesh = Meshes(verts=[face_geometry], faces=[triangle_face], textures=textures)
+        center = face_geometry.mean(0)
+        scale = max((face_geometry - center).abs().max(0)[0])
+        mesh.offset_verts_(-center)
+        mesh.scale_verts_((1.0 / float(scale)))
+
         images = self.renderer(mesh, R=self.rotation_matrix(pose[:3]).unsqueeze(0), T=pose[3:].unsqueeze(0))
         return images[0, ..., :3]
 
