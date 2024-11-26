@@ -1,4 +1,3 @@
-import h5py
 from pytorch3d.renderer import (
     FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
     SoftPhongShader, TexturesVertex, PointLights
@@ -29,7 +28,10 @@ class ProjectFunction(nn.Module):
             shader=SoftPhongShader(
                 device=self.device,
                 cameras=self.cameras,
-                lights=PointLights(device=self.device, location=[[0.0, 1.0, 3.0]]),
+                lights=PointLights(
+                    device=self.device,
+                    location=[[-1.0, -1.0, 3.0]],
+                ),
             )
         )
 
