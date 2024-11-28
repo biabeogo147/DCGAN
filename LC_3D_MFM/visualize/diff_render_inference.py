@@ -8,7 +8,7 @@ from LC_3D_MFM.dataset_mfm.h5_analysis import get_face_properties_from_h5
 
 
 def save_image(image):
-    plt.imsave("image.png", image)
+    plt.imsave("../../testing_landmark_detect/image.png", image)
 
 
 def plot_pointcloud(vertices, faces, title=""):
@@ -49,10 +49,13 @@ def plot_colored_points(vertices, colors, title=""):
 
 
 def mesh_with_texture(vertices, faces, colors, title=""):
-    pose = torch.tensor([-0.2, 0.0, 0.0, 0.0, 0.0, 2.0], dtype=torch.float32)
+    # pose = torch.tensor([-0.2, 0.0, 0.0, 0.0, 0.0, 2.0], dtype=torch.float32)
+    pose = torch.tensor([0.0, -1.57, 0.0, 0.0, 0.0, 2.0], dtype=torch.float32)
     project_function = image_formation.ProjectFunction(focal_length=200.0, image_size=240, device="cpu")
     image = project_function(vertices, faces, colors, pose)
-    plt.imshow(image.cpu().numpy())
+    image = image.cpu().numpy()
+    save_image(image)
+    plt.imshow(image)
     plt.title(title)
     plt.axis("off")
     plt.show()
@@ -60,14 +63,14 @@ def mesh_with_texture(vertices, faces, colors, title=""):
 
 if __name__ == '__main__':
     # file_path_obj = "D:/DS-AI/data/voxceleb3d/all.obj"
-    file_path_obj = "../../data/male.obj"
-
-    vertices, faces, _ = load_obj(file_path_obj)
-    faces = faces.verts_idx
+    # file_path_obj = "../../data/male.obj"
+    # vertices, faces, _ = load_obj(file_path_obj)
+    # faces = faces.verts_idx
     # plot_pointcloud(all_vertices, all_faces, title="Original Mesh")
-    mesh_no_texture(vertices, faces, title="Mesh without Texture")
+    # mesh_no_texture(vertices, faces, title="Mesh without Texture")
 
-    # file_path_h5 = "D:/DS-AI/data/model2019_bfm.h5"
-    # vertices, faces, colors = get_face_properties_from_h5(file_path_h5)
+    file_path_h5 = "D:/DS-AI/data/model2019_bfm.h5"
+    vertices, faces, colors = get_face_properties_from_h5(file_path_h5)
+    # print(vertices.shape, faces.shape, colors.shape)
     # plot_colored_points(vertices, colors, title="Colored Points")
-    # mesh_with_texture(vertices, faces, colors, title="Mesh with Texture")
+    mesh_with_texture(vertices, faces, colors, title="Mesh with Texture")

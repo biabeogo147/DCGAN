@@ -50,6 +50,8 @@ def get_face_properties_from_h5(file_path):
 
 if __name__ == '__main__':
     file_path = 'D:/DS-AI/data/model2019_bfm.h5'
+    vertices, faces, colors = get_face_properties_from_h5(file_path)
+    print(vertices.shape, faces.shape, colors.shape)
     # review_h5_file(file_path)
     # print_first_line(file_path, 'color/representer/colorspace')
 

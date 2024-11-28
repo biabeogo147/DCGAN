@@ -88,7 +88,8 @@ class SiameseModel(nn.Module):
 
         poses, expressions, illuminations = [], [], []
         for i in range(low_features.shape[0]):
-            pose, expression, illumination, _ = self.parameter_estimation_branch(shape_param, reflectance_param, low_features[i])
+            pose, expression, illumination, _ = self.parameter_estimation_branch(shape_param, reflectance_param,
+                                                                                 low_features[i])
             poses.append(pose)
             expressions.append(expression)
             illuminations.append(illumination)
@@ -117,7 +118,6 @@ class FaceModel(nn.Module):
         """ We should precompute this before training """
         self.U = torch.randn(num_vertices * 3, num_graph_nodes * 3)
 
-
     def set_mean_face(self):
         mean_face = []
         triangle_face = []
@@ -129,7 +129,6 @@ class FaceModel(nn.Module):
                     triangle_face.append(list(map(int, line.strip().split()[1:])))
 
         return torch.tensor(mean_face), torch.tensor(triangle_face)
-
 
     def forward(self, identity_params, expression_params, reflectance_params):
         identity_graph = self.identity_model_graph(identity_params)
@@ -162,6 +161,6 @@ class FullFaceModel(nn.Module):
         """ Normalizing images before feeding to the model """
         identity, reflectance, poses, expressions, illuminations = self.siamese_model(frames)
         face_geometry, reflectance_output, geometry_graph = self.face_model(identity.unsqueeze(0),
-                                                            torch.mean(torch.stack(expressions), dim=0),
-                                                            reflectance.unsqueeze(0))
+                                                                            torch.mean(torch.stack(expressions), dim=0),
+                                                                            reflectance.unsqueeze(0))
         return face_geometry, reflectance_output, poses, geometry_graph, illuminations
