@@ -7,6 +7,10 @@ from pytorch3d.ops import sample_points_from_meshes
 from LC_3D_MFM.dataset_mfm.h5_analysis import get_face_properties_from_h5
 
 
+def save_image(image):
+    plt.imsave("image.png", image)
+
+
 def plot_pointcloud(vertices, faces, title=""):
     mesh = Meshes(verts=[vertices], faces=[faces])
     points = sample_points_from_meshes(mesh, num_samples=len(vertices))
@@ -26,7 +30,9 @@ def mesh_no_texture(vertices, faces, title=""):
     pose = torch.tensor([0.0, -1.57, 0.0, 0.0, 0.0, 2.0], dtype=torch.float32)
     project_function = image_formation.ProjectFunction(focal_length=200.0, image_size=240, device="cpu")
     image = project_function(vertices, faces, torch.ones_like(vertices), pose)
-    plt.imshow(image.cpu().numpy())
+    image = image.cpu().numpy()
+    save_image(image)
+    plt.imshow(image)
     plt.title(title)
     plt.axis("off")
     plt.show()
