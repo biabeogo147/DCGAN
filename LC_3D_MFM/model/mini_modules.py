@@ -6,11 +6,11 @@ import torch.nn.functional as F
 class FeatureExtractor(nn.Module):
     def __init__(self):
         super(FeatureExtractor, self).__init__()
-        self.conv1 = nn.Conv2d(3, 96, kernel_size=11, stride=4)
+        self.conv1 = nn.Conv2d(3, 96, kernel_size=11, stride=4, padding=4)
         self.pool1 = nn.MaxPool2d(kernel_size=3, stride=2)
-        self.conv2 = nn.Conv2d(96, 256, kernel_size=5, stride=1)
+        self.conv2 = nn.Conv2d(96, 256, kernel_size=5, stride=1, padding=2)
         self.pool2 = nn.MaxPool2d(kernel_size=3, stride=2)
-        self.conv3 = nn.Conv2d(256, 384, kernel_size=3, stride=1)
+        self.conv3 = nn.Conv2d(256, 384, kernel_size=3, stride=1, padding="same")
         self.conv4 = nn.Conv2d(384, 256, kernel_size=3, stride=2)
         self.conv5 = nn.Conv2d(256, 256, kernel_size=3, stride=2)
 
@@ -62,14 +62,14 @@ class ParameterEstimation(nn.Module):
 
     def forward(self, identity_param, reflectance_param, low_features):
         x = F.relu(self.fc(torch.cat([identity_param, reflectance_param], dim=1)))
-        x = x.view(-1, 1, 14, 14)
+        x = x.view(-1, 14, 14)
         x = F.relu(self.conv1(x))
-        x = torch.cat([x, low_features], dim=1)
+        x = torch.cat([x, low_features], dim=0)
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
         x = self.pool(x)
-        x = torch.flatten(x, 1)
+        x = torch.flatten(x)
         x = F.relu(self.fc1(x))
         pose_param = self.fc2(x)
         return pose_param
@@ -108,10 +108,12 @@ class FaceModel(nn.Module):
 
     def forward(self, identity_params, reflectance_params):
         identity = self.identity_model(identity_params).view(identity_params.shape[0], -1, 3)
-        face_geometry = self.mean_face + identity
+        mean_face = self.mean_face.expand(identity_params.shape[0], -1, -1)
+        face_geometry = mean_face + identity
 
         reflectance = self.reflectance_model(reflectance_params).view(reflectance_params.shape[0], -1, 3)
-        face_reflectance = self.mean_reflectance + reflectance
+        mean_reflectance = self.mean_reflectance.expand(reflectance_params.shape[0], -1, -1)
+        face_reflectance = mean_reflectance + reflectance
 
         return face_geometry, face_reflectance
 
