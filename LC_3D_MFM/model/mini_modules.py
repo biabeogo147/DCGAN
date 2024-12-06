@@ -11,8 +11,8 @@ class FeatureExtractor(nn.Module):
         self.conv2 = nn.Conv2d(96, 256, kernel_size=5, stride=1, padding=2)
         self.pool2 = nn.MaxPool2d(kernel_size=3, stride=2)
         self.conv3 = nn.Conv2d(256, 384, kernel_size=3, stride=1, padding="same")
-        self.conv4 = nn.Conv2d(384, 256, kernel_size=3, stride=2)
-        self.conv5 = nn.Conv2d(256, 256, kernel_size=3, stride=2)
+        self.conv4 = nn.Conv2d(384, 256, kernel_size=3, stride=2, padding=1)
+        self.conv5 = nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -28,7 +28,6 @@ class FeatureExtractor(nn.Module):
 class SharedIdentity(nn.Module):
     def __init__(self):
         super(SharedIdentity, self).__init__()
-        self.mean_pool = nn.AdaptiveAvgPool2d((4, 4))
         self.conv1 = nn.Conv2d(256, 384, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(384, 256, kernel_size=3, stride=1, padding=1)
         self.fc1 = nn.Linear(256 * 4 * 4, 1000)
@@ -36,7 +35,7 @@ class SharedIdentity(nn.Module):
         self.fc3 = nn.Linear(1000, 160)
 
     def forward(self, x):
-        x = self.mean_pool(x)
+        x = torch.mean(x, dim=0, keepdim=True)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = torch.flatten(x, 1)
@@ -90,6 +89,7 @@ class SiameseModel(nn.Module):
         for i in range(low_features.shape[0]):
             pose = self.parameter_estimation_branch(identity_param, reflectance_param, low_features[i])
             poses.append(pose)
+        poses = torch.stack(poses)
 
         return identity_param, reflectance_param, poses
 

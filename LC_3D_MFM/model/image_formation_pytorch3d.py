@@ -1,12 +1,10 @@
-from pytorch3d.renderer import (
-    FoVPerspectiveCameras, RasterizationSettings, MeshRenderer, MeshRasterizer,
-    SoftPhongShader, TexturesVertex, PointLights
-)
-from scipy.spatial.transform import Rotation as R
-from pytorch3d.structures import Meshes
-import torch.nn.functional as F
-from torch import nn
 import torch
+import torch.nn as nn
+from pytorch3d.renderer import (
+    MeshRenderer, MeshRasterizer, RasterizationSettings,
+    SoftPhongShader, TexturesVertex, FoVPerspectiveCameras, PointLights
+)
+from pytorch3d.structures import Meshes
 
 
 class DifferentialRender(nn.Module):
@@ -15,6 +13,7 @@ class DifferentialRender(nn.Module):
         self.device = device
         self.image_size = image_size
         self.focal_length = focal_length
+
         self.cameras = FoVPerspectiveCameras(device=self.device)
         self.renderer = MeshRenderer(
             rasterizer=MeshRasterizer(
@@ -36,25 +35,37 @@ class DifferentialRender(nn.Module):
         )
 
     def rotation_matrix(self, pose):
-        rotation = R.from_rotvec(pose).as_matrix()
-        return torch.tensor(rotation, dtype=torch.float32, device=self.device)
+        roll, pitch, yaw = pose
 
-    def forward(self, face_geometry, triangle_face, colors, pose):
-        if not isinstance(face_geometry, torch.Tensor):
-            face_geometry = torch.tensor(face_geometry, dtype=torch.float32, device=self.device)
-        if not isinstance(triangle_face, torch.Tensor):
-            triangle_face = torch.tensor(triangle_face, dtype=torch.int64, device=self.device)
-        if not isinstance(colors, torch.Tensor):
-            colors = torch.tensor(colors, dtype=torch.float32, device=self.device)
-        if not isinstance(pose, torch.Tensor):
-            pose = torch.tensor(pose, dtype=torch.float32, device=self.device)
+        R_x = torch.tensor([[1, 0, 0],
+                            [0, torch.cos(roll), -torch.sin(roll)],
+                            [0, torch.sin(roll), torch.cos(roll)]], dtype=torch.float32, device=self.device)
+
+        R_y = torch.tensor([[torch.cos(pitch), 0, torch.sin(pitch)],
+                            [0, 1, 0],
+                            [-torch.sin(pitch), 0, torch.cos(pitch)]], dtype=torch.float32, device=self.device)
+
+        R_z = torch.tensor([[torch.cos(yaw), -torch.sin(yaw), 0],
+                            [torch.sin(yaw), torch.cos(yaw), 0],
+                            [0, 0, 1]], dtype=torch.float32, device=self.device)
+
+        R = R_z @ (R_y @ R_x)
+        return R
+
+    def forward(self, face_geometry, triangle_face, colors, poses):
+        face_geometry, triangle_face, colors, poses = face_geometry.to(self.device), triangle_face.to(
+            self.device), colors.to(self.device), poses.to(self.device)
+
         textures = TexturesVertex(verts_features=[colors])
 
         mesh = Meshes(verts=[face_geometry], faces=[triangle_face], textures=textures)
+
         center = face_geometry.mean(0)
         scale = (face_geometry - center).abs().max()
         mesh.offset_verts_(-center)
         mesh.scale_verts_((1.0 / float(scale)))
 
-        images = self.renderer(mesh, R=self.rotation_matrix(pose[:3]).unsqueeze(0), T=pose[3:].unsqueeze(0))
-        return images[0, ..., :3]
+        images = [self.renderer(mesh, R=self.rotation_matrix(pose[:3]).unsqueeze(0), T=pose[3:].unsqueeze(0)) for pose
+                  in poses]
+
+        return torch.stack(images)
